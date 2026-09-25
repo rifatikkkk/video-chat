@@ -116,6 +116,7 @@ export default function App() {
     const mediaController = new MediaController({ onStateChange: setMediaState });
     const peerManager = new PeerManager({
       sendDescription: (payload) => client.request('signal:description', payload),
+      sendCandidate: (payload) => client.request('signal:candidate', payload),
     });
     mediaControllerRef.current = mediaController;
     pendingParticipantEvents.current = [];

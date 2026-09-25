@@ -1,12 +1,22 @@
 export const PEER_CONNECTION_CONFIG = Object.freeze({
   iceServers: Object.freeze([{ urls: 'stun:stun.l.google.com:19302' }]),
 });
+export const MAX_QUEUED_ICE_CANDIDATES = 256;
+export const ICE_CANDIDATE_QUEUE_TTL_MS = 15_000;
 
 export class PeerManager {
-  constructor({ peerConnectionFactory = (config) => new RTCPeerConnection(config), maxPeers = 3, sendDescription = async () => {} } = {}) {
+  constructor({
+    peerConnectionFactory = (config) => new RTCPeerConnection(config),
+    maxPeers = 3,
+    sendDescription = async () => {},
+    sendCandidate = async () => {},
+    now = () => Date.now(),
+  } = {}) {
     this.peerConnectionFactory = peerConnectionFactory;
     this.maxPeers = maxPeers;
     this.sendDescription = sendDescription;
+    this.sendCandidate = sendCandidate;
+    this.now = now;
     this.roomEpoch = null;
     this.selfParticipantId = null;
     this.peers = new Map();
@@ -39,6 +49,7 @@ export class PeerManager {
     if (!peer) return null;
     this.signalLog.push(event);
     if (event.description) this.#queuePeerOperation(peer, () => this.#handleDescription(peer, event.description));
+    if ('candidate' in event) this.#queuePeerOperation(peer, () => this.#handleCandidate(peer, event));
     return peer;
   }
 
@@ -57,7 +68,11 @@ export class PeerManager {
       polite: this.selfParticipantId > remoteParticipantId,
       negotiationStarted: false,
       operationQueue: Promise.resolve(),
+      queuedIceCandidates: [],
+      remoteIceUfrag: null,
+      localIceUfrag: null,
     };
+    connection.onicecandidate = (event) => { void this.#sendCandidate(peer, event.candidate ?? null); };
     this.peers.set(remoteParticipantId, peer);
     if (peer.offerer) this.#queuePeerOperation(peer, () => this.#startOffer(peer));
     return peer;
@@ -114,19 +129,25 @@ export class PeerManager {
     peer.connection.addTransceiver('video', { direction: 'sendrecv' });
     const offer = await peer.connection.createOffer();
     await peer.connection.setLocalDescription(offer);
+    peer.localIceUfrag = iceUfragFromDescription(peer.connection.localDescription ?? offer);
     await this.#sendDescription(peer, peer.connection.localDescription ?? offer);
   }
 
   async #handleDescription(peer, description) {
     if (description.type === 'offer') {
       await peer.connection.setRemoteDescription(description);
+      peer.remoteIceUfrag = iceUfragFromDescription(description);
+      await this.#flushQueuedCandidates(peer);
       const answer = await peer.connection.createAnswer();
       await peer.connection.setLocalDescription(answer);
+      peer.localIceUfrag = iceUfragFromDescription(peer.connection.localDescription ?? answer);
       await this.#sendDescription(peer, peer.connection.localDescription ?? answer);
       return;
     }
     if (description.type === 'answer') {
       await peer.connection.setRemoteDescription(description);
+      peer.remoteIceUfrag = iceUfragFromDescription(description);
+      await this.#flushQueuedCandidates(peer);
     }
   }
 
@@ -137,4 +158,43 @@ export class PeerManager {
       description,
     });
   }
+
+  async #handleCandidate(peer, event) {
+    if (event.iceUfrag !== peer.remoteIceUfrag) {
+      if (!peer.connection.remoteDescription && !peer.remoteIceUfrag) this.#queueCandidate(peer, event);
+      return;
+    }
+    await peer.connection.addIceCandidate(event.candidate);
+  }
+
+  #queueCandidate(peer, event) {
+    if (peer.queuedIceCandidates.length >= MAX_QUEUED_ICE_CANDIDATES) return;
+    peer.queuedIceCandidates.push({ event, receivedAt: this.now() });
+  }
+
+  async #flushQueuedCandidates(peer) {
+    const pendingCandidates = peer.queuedIceCandidates;
+    peer.queuedIceCandidates = [];
+    for (const item of pendingCandidates) {
+      if (this.now() - item.receivedAt > ICE_CANDIDATE_QUEUE_TTL_MS) continue;
+      if (item.event.iceUfrag !== peer.remoteIceUfrag) continue;
+      await peer.connection.addIceCandidate(item.event.candidate);
+    }
+  }
+
+  async #sendCandidate(peer, candidate) {
+    if (!peer.localIceUfrag) peer.localIceUfrag = iceUfragFromDescription(peer.connection.localDescription);
+    if (!peer.localIceUfrag) return;
+    await this.sendCandidate({
+      roomEpoch: peer.roomEpoch,
+      toParticipantId: peer.remoteParticipantId,
+      iceUfrag: peer.localIceUfrag,
+      candidate,
+    });
+  }
+}
+
+export function iceUfragFromDescription(description) {
+  if (!description?.sdp) return null;
+  return /^a=ice-ufrag:(.+)$/m.exec(description.sdp)?.[1]?.trim() ?? null;
 }
