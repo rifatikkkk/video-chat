@@ -29,11 +29,12 @@ describe('Socket.IO integration harness', () => {
     const client = createClient(url, { transports: ['websocket'], forceNew: true });
 
     try {
-      await new Promise((resolve, reject) => {
+      const ready = await new Promise((resolve, reject) => {
         client.once('server:ready', resolve);
         client.once('connect_error', reject);
       });
       expect(client.connected).toBe(true);
+      expect(ready).toEqual({ v: 1 });
     } finally {
       client.close();
     }
