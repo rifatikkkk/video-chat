@@ -1,8 +1,14 @@
 export function mergeChatEntry(messages, entry) {
   const existingIndex = messages.findIndex((message) => message.id === entry.id || (entry.clientMessageId && message.clientMessageId === entry.clientMessageId));
   const confirmed = { ...entry, status: 'confirmed' };
-  if (existingIndex < 0) return [...messages, confirmed];
-  return messages.map((message, index) => index === existingIndex ? { ...message, ...confirmed } : message);
+  const next = existingIndex < 0
+    ? [...messages, confirmed]
+    : messages.map((message, index) => index === existingIndex ? { ...message, ...confirmed } : message);
+  return [...next].sort((first, second) => (first.seq ?? Number.MAX_SAFE_INTEGER) - (second.seq ?? Number.MAX_SAFE_INTEGER));
+}
+
+export function mergeChatEntries(messages, entries) {
+  return entries.reduce(mergeChatEntry, messages);
 }
 
 export function addPendingMessage(messages, { clientMessageId, text, displayName }) {
