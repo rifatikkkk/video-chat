@@ -188,6 +188,23 @@ export class RoomRegistry {
     return { entries, nextAfterSeq: done ? null : lastSeq, done, throughSeq };
   }
 
+  updateMedia({ socketId, roomEpoch, revision, micEnabled, cameraEnabled }) {
+    const membership = this.socketIndex.get(socketId);
+    if (!membership) throw new RegistryError(ERROR_CODES.NOT_JOINED, 'Socket is not in a room.');
+    const room = this.rooms.get(membership.roomId);
+    if (!room || room.epoch !== roomEpoch) throw new RegistryError(ERROR_CODES.STALE_ROOM, 'Room epoch does not match the active session.');
+    if (!Number.isInteger(revision) || revision < 1 || typeof micEnabled !== 'boolean' || typeof cameraEnabled !== 'boolean') {
+      throw new RegistryError(ERROR_CODES.INVALID_REQUEST, 'Media state is invalid.');
+    }
+    const participant = room.participants.get(membership.participantId);
+    if (revision <= participant.mediaRevision) return { room, participant, changed: false };
+    participant.mediaRevision = revision;
+    participant.micEnabled = micEnabled;
+    participant.cameraEnabled = cameraEnabled;
+    const entry = { seq: room.nextSeq++ };
+    return { room, participant, entry, changed: true };
+  }
+
   #validateJoinInput({ socketId, displayName }) {
     const validatedName = validateDisplayName(displayName);
     if (!validatedName.ok) throw new RegistryError(ERROR_CODES.INVALID_NAME, validatedName.reason);

@@ -119,4 +119,12 @@ describe('RoomRegistry model', () => {
     expect(page).toMatchObject({ done: false, nextAfterSeq: first.entry.seq });
     expect(finalPage).toMatchObject({ entries: [], done: true, nextAfterSeq: null });
   });
+
+  it('only accepts strictly increasing media revisions for its own participant', () => {
+    const registry = new RoomRegistry();
+    const joined = registry.join({ roomId: 'media_room', socketId: 'socket-1', displayName: 'Анна' });
+    expect(registry.updateMedia({ socketId: 'socket-1', roomEpoch: joined.room.epoch, revision: 1, micEnabled: true, cameraEnabled: false })).toMatchObject({ changed: true });
+    expect(registry.updateMedia({ socketId: 'socket-1', roomEpoch: joined.room.epoch, revision: 1, micEnabled: false, cameraEnabled: true })).toMatchObject({ changed: false });
+    expect(joined.participant).toMatchObject({ micEnabled: true, cameraEnabled: false, mediaRevision: 1 });
+  });
 });
