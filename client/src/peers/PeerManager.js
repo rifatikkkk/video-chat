@@ -67,6 +67,8 @@ export class PeerManager {
       offerer: this.selfParticipantId < remoteParticipantId,
       polite: this.selfParticipantId > remoteParticipantId,
       negotiationStarted: false,
+      makingOffer: false,
+      ignoringOffer: false,
       operationQueue: Promise.resolve(),
       queuedIceCandidates: [],
       remoteIceUfrag: null,
@@ -117,7 +119,11 @@ export class PeerManager {
   #queuePeerOperation(peer, operation) {
     peer.operationQueue = peer.operationQueue.catch(() => null).then(async () => {
       if (this.peers.get(peer.remoteParticipantId) !== peer) return;
-      await operation();
+      try {
+        await operation();
+      } catch {
+        peer.queuedIceCandidates = [];
+      }
     });
     return peer.operationQueue;
   }
@@ -127,14 +133,29 @@ export class PeerManager {
     peer.negotiationStarted = true;
     peer.connection.addTransceiver('audio', { direction: 'sendrecv' });
     peer.connection.addTransceiver('video', { direction: 'sendrecv' });
-    const offer = await peer.connection.createOffer();
-    await peer.connection.setLocalDescription(offer);
-    peer.localIceUfrag = iceUfragFromDescription(peer.connection.localDescription ?? offer);
-    await this.#sendDescription(peer, peer.connection.localDescription ?? offer);
+    peer.makingOffer = true;
+    try {
+      const offer = await peer.connection.createOffer();
+      await peer.connection.setLocalDescription(offer);
+      peer.localIceUfrag = iceUfragFromDescription(peer.connection.localDescription ?? offer);
+      await this.#sendDescription(peer, peer.connection.localDescription ?? offer);
+    } finally {
+      peer.makingOffer = false;
+    }
   }
 
   async #handleDescription(peer, description) {
     if (description.type === 'offer') {
+      const offerCollision = peer.makingOffer || peer.connection.signalingState !== 'stable';
+      peer.ignoringOffer = !peer.polite && offerCollision;
+      if (peer.ignoringOffer) {
+        peer.queuedIceCandidates = [];
+        return;
+      }
+      if (offerCollision) {
+        await peer.connection.setLocalDescription({ type: 'rollback' });
+        peer.localIceUfrag = null;
+      }
       await peer.connection.setRemoteDescription(description);
       peer.remoteIceUfrag = iceUfragFromDescription(description);
       await this.#flushQueuedCandidates(peer);
@@ -145,6 +166,7 @@ export class PeerManager {
       return;
     }
     if (description.type === 'answer') {
+      peer.ignoringOffer = false;
       await peer.connection.setRemoteDescription(description);
       peer.remoteIceUfrag = iceUfragFromDescription(description);
       await this.#flushQueuedCandidates(peer);
@@ -160,6 +182,7 @@ export class PeerManager {
   }
 
   async #handleCandidate(peer, event) {
+    if (peer.ignoringOffer) return;
     if (event.iceUfrag !== peer.remoteIceUfrag) {
       if (!peer.connection.remoteDescription && !peer.remoteIceUfrag) this.#queueCandidate(peer, event);
       return;
