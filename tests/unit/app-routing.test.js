@@ -11,6 +11,7 @@ describe('room entry routing', () => {
   it('keeps a full room distinguishable and retryable', () => {
     expect(joinErrorMessage('ROOM_FULL')).toMatch(/заполнена/i);
     expect(joinErrorMessage('INVALID_ROOM_ID')).toMatch(/Некорректная/i);
+    expect(joinErrorMessage('PROTOCOL_MISMATCH')).toMatch(/Обновите страницу/);
   });
 
   it('requires a new form entry after restoring a page from bfcache', () => {
