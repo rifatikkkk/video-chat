@@ -8,6 +8,8 @@ export class MediaController {
     this.tracks = { audio: null, video: null };
     this.state = { audio: 'off', video: 'off', audioError: null, videoError: null };
     this.disposed = false;
+    this.generations = { audio: 0, video: 0 };
+    this.queues = { audio: Promise.resolve(), video: Promise.resolve() };
   }
 
   start() {
@@ -15,11 +17,11 @@ export class MediaController {
   }
 
   async startAudio() {
-    return this.#capture('audio', { audio: AUDIO_CONSTRAINTS, video: false });
+    return this.#scheduleCapture('audio', { audio: AUDIO_CONSTRAINTS, video: false });
   }
 
   async startVideo() {
-    return this.#capture('video', { audio: false, video: VIDEO_CONSTRAINTS });
+    return this.#scheduleCapture('video', { audio: false, video: VIDEO_CONSTRAINTS });
   }
 
   getState() {
@@ -30,31 +32,59 @@ export class MediaController {
     return this.tracks[kind];
   }
 
+  stopAudio() {
+    this.#stop('audio');
+  }
+
+  stopVideo() {
+    this.#stop('video');
+  }
+
   dispose() {
     if (this.disposed) return;
     this.disposed = true;
-    for (const track of Object.values(this.tracks)) track?.stop();
-    this.tracks = { audio: null, video: null };
+    this.generations.audio += 1;
+    this.generations.video += 1;
+    this.#stopTrack('audio');
+    this.#stopTrack('video');
     this.#setState({ audio: 'off', video: 'off' });
   }
 
-  async #capture(kind, constraints) {
-    if (this.disposed) return null;
+  #scheduleCapture(kind, constraints) {
+    const generation = ++this.generations[kind];
+    const capture = this.queues[kind].catch(() => null).then(() => this.#capture(kind, constraints, generation));
+    this.queues[kind] = capture;
+    return capture;
+  }
+
+  #stop(kind) {
+    this.generations[kind] += 1;
+    this.#stopTrack(kind);
+    this.#setState({ [kind]: 'off', [`${kind}Error`]: null });
+  }
+
+  #stopTrack(kind) {
+    this.tracks[kind]?.stop();
+    this.tracks[kind] = null;
+  }
+
+  async #capture(kind, constraints, generation) {
+    if (this.disposed || generation !== this.generations[kind]) return null;
     this.#setState({ [kind]: 'pending', [`${kind}Error`]: null });
     try {
       const stream = await this.mediaDevices.getUserMedia(constraints);
       const track = kind === 'audio' ? stream.getAudioTracks()[0] : stream.getVideoTracks()[0];
-      if (this.disposed) {
+      if (this.disposed || generation !== this.generations[kind]) {
         stream.getTracks().forEach((lateTrack) => lateTrack.stop());
         return null;
       }
       if (!track) throw new Error(`No ${kind} track returned.`);
-      this.tracks[kind]?.stop();
+      this.#stopTrack(kind);
       this.tracks[kind] = track;
       this.#setState({ [kind]: 'on' });
       return track;
     } catch (error) {
-      if (!this.disposed) this.#setState({ [kind]: 'off', [`${kind}Error`]: error.name ?? 'MediaError' });
+      if (!this.disposed && generation === this.generations[kind]) this.#setState({ [kind]: 'off', [`${kind}Error`]: error.name ?? 'MediaError' });
       return null;
     }
   }
