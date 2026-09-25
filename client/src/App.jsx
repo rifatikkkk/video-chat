@@ -6,7 +6,8 @@ import { copyInvitation } from './clipboard/invitation.js';
 import { ParticipantGrid } from './components/ParticipantGrid.jsx';
 import { applyParticipantEvent } from './participants/participantState.js';
 import { ChatPanel } from './components/ChatPanel.jsx';
-import { addPendingMessage, chatErrorMessage, markMessage, mergeChatEntry } from './chat/chatState.js';
+import { addPendingMessage, chatErrorMessage, markMessage, mergeChatEntries, mergeChatEntry } from './chat/chatState.js';
+import { loadHistoryPages } from './chat/historyLoader.js';
 
 export function getRoomIdFromPath(pathname) {
   const match = /^\/room\/([^/]+)$/.exec(pathname);
@@ -76,7 +77,9 @@ export default function App() {
       onRoomEvent: (roomEvent) => {
         if (joiningRef.current) pendingParticipantEvents.current.push(roomEvent);
         setParticipants((current) => applyParticipantEvent(current, roomEvent));
-        if (roomEvent.kind === 'chat-message') setMessages((current) => mergeChatEntry(current, roomEvent.payload.entry));
+        if (['chat-message', 'participant-joined', 'participant-left'].includes(roomEvent.kind)) {
+          setMessages((current) => mergeChatEntry(current, roomEvent.payload.entry));
+        }
       },
     });
     sessionRef.current = session;
@@ -87,6 +90,7 @@ export default function App() {
       setParticipants(pendingParticipantEvents.current.reduce(applyParticipantEvent, joined.participants));
       pendingParticipantEvents.current = [];
       joiningRef.current = false;
+      void loadRoomHistory(session, joined);
       const nextPath = `/room/${joined.roomId}`;
       window.history.pushState({}, '', nextPath);
       setPathname(nextPath);
@@ -136,6 +140,20 @@ export default function App() {
       setMessages((current) => markMessage(current, clientMessageId, status, status === 'error' ? 'Не удалось отправить сообщение.' : ''));
     }
     return false;
+  }
+
+  async function loadRoomHistory(session, joined) {
+    try {
+      await loadHistoryPages({
+        request: session.signalingClient.request.bind(session.signalingClient),
+        roomEpoch: joined.roomEpoch,
+        throughSeq: joined.historyThroughSeq,
+        isCurrent: () => sessionRef.current === session,
+        onEntries: (entries) => setMessages((current) => mergeChatEntries(current, entries)),
+      });
+    } catch {
+      // Live chat remains usable even if historical messages cannot be fetched.
+    }
   }
 
   if (snapshot) {
