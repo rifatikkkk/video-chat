@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { io as createClient } from 'socket.io-client';
 import { createAppServer } from '../../server/src/app.js';
+import { SlowConsumerGuard } from '../../server/src/socket/SlowConsumerGuard.js';
 
 const runningServers = [];
 
@@ -11,8 +12,8 @@ afterEach(async () => {
   })));
 });
 
-function startIsolatedServer() {
-  const instance = createAppServer();
+function startIsolatedServer(options) {
+  const instance = createAppServer(options);
   runningServers.push(instance);
 
   return new Promise((resolve) => {
@@ -166,6 +167,43 @@ describe('Socket.IO integration harness', () => {
       expect(page).toMatchObject({ ok: true, data: { throughSeq: 2, done: true, entries: [{ type: 'join' }, { type: 'user', text: 'Первое' }] } });
     } finally {
       anna.close();
+    }
+  });
+
+  it('disconnects an overloaded recipient while other members continue receiving events', async () => {
+    let slowSocketId;
+    const guard = new SlowConsumerGuard({
+      maxPendingPackets: 1,
+      getPendingPackets: (socket) => socket.id === slowSocketId ? 2 : 0,
+    });
+    const url = await startIsolatedServer({ slowConsumerGuard: guard });
+    const anna = createClient(url, { transports: ['websocket'], forceNew: true });
+    const slow = createClient(url, { transports: ['websocket'], forceNew: true });
+
+    try {
+      const waitReady = (client) => new Promise((resolve, reject) => { client.once('server:ready', resolve); client.once('connect_error', reject); });
+      await Promise.all([waitReady(anna), waitReady(slow)]);
+      const created = await anna.emitWithAck('room:create', { v: 1, requestId: crypto.randomUUID(), displayName: 'Анна' });
+      slowSocketId = slow.id;
+      const left = new Promise((resolve) => anna.on('room:event', (event) => {
+        if (event.kind === 'participant-left') resolve(event);
+      }));
+      slow.emit('room:join', { v: 1, requestId: crypto.randomUUID(), roomId: created.data.roomId, displayName: 'Медленный' });
+      const leftEvent = await left;
+      const message = await anna.emitWithAck('chat:send', {
+        v: 1,
+        requestId: crypto.randomUUID(),
+        roomEpoch: created.data.roomEpoch,
+        clientMessageId: crypto.randomUUID(),
+        text: 'Связь продолжается',
+      });
+
+      expect(leftEvent).toMatchObject({ payload: { entry: { type: 'leave' } } });
+      expect(slow.connected).toBe(false);
+      expect(message).toMatchObject({ ok: true, data: { entry: { text: 'Связь продолжается' } } });
+    } finally {
+      anna.close();
+      slow.close();
     }
   });
 });

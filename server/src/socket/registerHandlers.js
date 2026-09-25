@@ -18,14 +18,17 @@ function requestError(requestId, code, message) {
   return createErrorAck(requestId, code, message ?? ERROR_MESSAGES[code] ?? 'Операция не выполнена.');
 }
 
-function emitRoomEvent(io, room, kind, payload) {
+function emitRoomEvent(io, room, kind, payload, slowConsumerGuard) {
   const event = { v: PROTOCOL_VERSION, roomEpoch: room.epoch, seq: payload.entry.seq, kind, payload };
   for (const participant of room.participants.values()) {
-    io.to(participant.socketId).emit('room:event', event);
+    const recipient = io.sockets.sockets.get(participant.socketId);
+    if (!recipient) continue;
+    recipient.emit('room:event', event);
+    slowConsumerGuard.disconnectIfOverloaded(recipient);
   }
 }
 
-export function registerHandlers(socket, registry, io) {
+export function registerHandlers(socket, registry, io, { slowConsumerGuard }) {
   const requestCache = new Map();
   const buckets = new Map();
   const limits = {
@@ -77,7 +80,7 @@ export function registerHandlers(socket, registry, io) {
     emitRoomEvent(io, result.room, 'participant-joined', {
       participant: toPublicParticipant(result.participant),
       entry: result.entry,
-    });
+    }, slowConsumerGuard);
     return result.snapshot;
   });
 
@@ -86,7 +89,7 @@ export function registerHandlers(socket, registry, io) {
     emitRoomEvent(io, result.room, 'participant-joined', {
       participant: toPublicParticipant(result.participant),
       entry: result.entry,
-    });
+    }, slowConsumerGuard);
     return result.snapshot;
   });
 
@@ -96,7 +99,7 @@ export function registerHandlers(socket, registry, io) {
       emitRoomEvent(io, result.room, 'participant-left', {
         participantId: result.participant.participantId,
         entry: result.entry,
-      });
+      }, slowConsumerGuard);
     }
     return { left: result.left };
   });
@@ -104,7 +107,7 @@ export function registerHandlers(socket, registry, io) {
   handle('chat:send', ({ roomEpoch, clientMessageId, text }) => {
     const result = registry.appendMessage({ socketId: socket.id, roomEpoch, clientMessageId, text });
     if (!result.duplicate) {
-      emitRoomEvent(io, result.room, 'chat-message', { entry: result.entry });
+      emitRoomEvent(io, result.room, 'chat-message', { entry: result.entry }, slowConsumerGuard);
     }
     return { entry: result.entry, duplicate: result.duplicate };
   });
@@ -122,7 +125,7 @@ export function registerHandlers(socket, registry, io) {
         micEnabled: result.participant.micEnabled,
         cameraEnabled: result.participant.cameraEnabled,
         mediaRevision: result.participant.mediaRevision,
-      });
+      }, slowConsumerGuard);
     }
     return { changed: result.changed };
   });
@@ -149,7 +152,7 @@ export function registerHandlers(socket, registry, io) {
       emitRoomEvent(io, result.room, 'participant-left', {
         participantId: result.participant.participantId,
         entry: result.entry,
-      });
+      }, slowConsumerGuard);
     }
     requestCache.clear();
     buckets.clear();
