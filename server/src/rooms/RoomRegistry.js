@@ -95,6 +95,35 @@ export class RoomRegistry {
     return this.#joinRoom({ room, socketId, displayName: normalizedName });
   }
 
+  leave({ socketId, roomEpoch } = {}) {
+    const membership = this.socketIndex.get(socketId);
+    if (!membership) return { left: false, entry: null };
+    if (roomEpoch !== undefined && roomEpoch !== membership.epoch) {
+      throw new RegistryError(ERROR_CODES.STALE_ROOM, 'Room epoch does not match the active session.');
+    }
+
+    const room = this.rooms.get(membership.roomId);
+    this.socketIndex.delete(socketId);
+    if (!room) return { left: false, entry: null };
+
+    const participant = room.participants.get(membership.participantId);
+    if (!participant) return { left: false, entry: null };
+
+    room.participants.delete(participant.participantId);
+    const entry = this.createChatEntry({
+      room,
+      type: 'leave',
+      participantId: participant.participantId,
+      displayName: participant.displayName,
+    });
+    room.history.push(entry);
+
+    if (room.participants.size === 0) {
+      this.rooms.delete(room.roomId);
+    }
+    return { left: true, room, participant, entry };
+  }
+
   #validateJoinInput({ socketId, displayName }) {
     const validatedName = validateDisplayName(displayName);
     if (!validatedName.ok) throw new RegistryError(ERROR_CODES.INVALID_NAME, validatedName.reason);
