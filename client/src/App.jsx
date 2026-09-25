@@ -8,6 +8,7 @@ import { applyParticipantEvent } from './participants/participantState.js';
 import { ChatPanel } from './components/ChatPanel.jsx';
 import { addPendingMessage, chatErrorMessage, markMessage, mergeChatEntries, mergeChatEntry } from './chat/chatState.js';
 import { loadHistoryPages } from './chat/historyLoader.js';
+import { checkBrowserEnvironment } from './environment/preflight.js';
 
 export function getRoomIdFromPath(pathname) {
   const match = /^\/room\/([^/]+)$/.exec(pathname);
@@ -17,6 +18,7 @@ export function getRoomIdFromPath(pathname) {
 export function joinErrorMessage(code) {
   if (code === 'ROOM_FULL') return 'Комната заполнена. Освободится место — повторите вход вручную.';
   if (code === 'INVALID_ROOM_ID') return 'Некорректная ссылка на комнату.';
+  if (code === 'PROTOCOL_MISMATCH') return 'Версия приложения устарела. Обновите страницу и попробуйте снова.';
   if (code === 'CONNECT_FAILED' || code === 'CONNECT_TIMEOUT') return 'Не удалось подключиться к серверу. Попробуйте ещё раз.';
   return 'Не удалось войти в комнату. Попробуйте ещё раз.';
 }
@@ -40,6 +42,7 @@ export default function App() {
   const joiningRef = useRef(false);
   const roomId = getRoomIdFromPath(pathname);
   const validRoomId = roomId === null || validateRoomId(roomId).ok;
+  const environment = checkBrowserEnvironment(window);
 
   function resetSessionView({ clearName = true } = {}) {
     joiningRef.current = false;
@@ -86,6 +89,10 @@ export default function App() {
   async function submit(event) {
     event.preventDefault();
     setError('');
+    if (!environment.ok) {
+      setError(environment.message);
+      return;
+    }
     const name = validateDisplayName(displayName);
     if (!name.ok) {
       setError('Введите имя: до 30 букв, цифр и пробелов.');
@@ -212,11 +219,12 @@ export default function App() {
         <h1>{roomId ? 'Вход в комнату' : 'Создайте комнату'}</h1>
         <p>{roomId ? 'Введите имя, чтобы присоединиться по приглашению.' : 'Введите имя и создайте новую комнату.'}</p>
         {!validRoomId && <p className="error" role="alert">Некорректная ссылка на комнату.</p>}
+        {!environment.ok && <p className="error" role="alert">{environment.message}</p>}
         <form onSubmit={submit} noValidate>
           <label htmlFor="display-name">Ваше имя</label>
-          <input id="display-name" value={displayName} onChange={(event) => setDisplayName(event.target.value)} autoComplete="name" maxLength="60" disabled={!validRoomId || Boolean(status)} />
+          <input id="display-name" value={displayName} onChange={(event) => setDisplayName(event.target.value)} autoComplete="name" maxLength="60" disabled={!validRoomId || !environment.ok || Boolean(status)} />
           {error && <p className="error" role="alert">{error}</p>}
-          <button type="submit" disabled={!validRoomId || Boolean(status)}>{status ? 'Подключаемся…' : roomId ? 'Войти в комнату' : 'Создать комнату'}</button>
+          <button type="submit" disabled={!validRoomId || !environment.ok || Boolean(status)}>{status ? 'Подключаемся…' : roomId ? 'Войти в комнату' : 'Создать комнату'}</button>
         </form>
         {roomId && <a href="/">Создать новую комнату</a>}
       </section>
