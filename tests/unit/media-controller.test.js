@@ -37,4 +37,32 @@ describe('MediaController', () => {
     controller.dispose();
     expect(audio.track.stopCalls).toBe(1);
   });
+
+  it('stops a late stream after disposal instead of reviving the device state', async () => {
+    let resolveCapture;
+    const late = stream('video');
+    const controller = new MediaController({ mediaDevices: { getUserMedia: () => new Promise((resolve) => { resolveCapture = resolve; }) } });
+    const pending = controller.startVideo();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    controller.dispose();
+    resolveCapture(late);
+    await pending;
+
+    expect(late.track.stopCalls).toBe(1);
+    expect(controller.getState().video).toBe('off');
+  });
+
+  it('invalidates a pending capture when the user stops that device', async () => {
+    let resolveCapture;
+    const late = stream('audio');
+    const controller = new MediaController({ mediaDevices: { getUserMedia: () => new Promise((resolve) => { resolveCapture = resolve; }) } });
+    const pending = controller.startAudio();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    controller.stopAudio();
+    resolveCapture(late);
+    await pending;
+
+    expect(late.track.stopCalls).toBe(1);
+    expect(controller.getState().audio).toBe('off');
+  });
 });
