@@ -40,7 +40,11 @@ export class RoomSession {
       await this.signalingClient.connect();
       this.#setState(SESSION_STATES.JOINING);
       const response = await this.signalingClient.request(roomId ? 'room:join' : 'room:create', roomId ? { roomId, displayName } : { displayName });
-      if (!response?.ok) throw new Error(response?.error?.message ?? 'Unable to join the room.');
+      if (!response?.ok) {
+        const error = new Error(response?.error?.message ?? 'Unable to join the room.');
+        error.code = response?.error?.code;
+        throw error;
+      }
       this.snapshot = response.data;
       this.#setState(SESSION_STATES.ACTIVE);
       return this.snapshot;
