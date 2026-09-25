@@ -22,7 +22,16 @@ export class RoomSession {
     this.cleaningUp = null;
     this.cleaned = false;
     this.earlyEventError = null;
-    this.eventBuffer = new SessionEventBuffer({ onRoomEvent, onSignal });
+    this.eventBuffer = new SessionEventBuffer({
+      onRoomEvent: (event) => {
+        this.peerManager.handleRoomEvent?.(event);
+        onRoomEvent?.(event);
+      },
+      onSignal: (event) => {
+        this.peerManager.handleSignal?.(event);
+        onSignal?.(event);
+      },
+    });
     this.unsubscribeDisconnect = this.signalingClient.on('disconnect', () => { void this.dispose({ sendLeave: false }); });
     this.unsubscribeRoomEvent = this.signalingClient.on('room:event', (event) => this.#receiveEarlyEvent('room', event));
     this.unsubscribeSignalDescription = this.signalingClient.on('signal:description', (event) => this.#receiveEarlyEvent('signal', event));
@@ -54,6 +63,7 @@ export class RoomSession {
       }
       if (this.earlyEventError) throw this.earlyEventError;
       this.snapshot = response.data;
+      this.peerManager.applySnapshot?.(this.snapshot);
       this.eventBuffer.applySnapshot(this.snapshot);
       this.#setState(SESSION_STATES.ACTIVE);
       return this.snapshot;
