@@ -6,10 +6,11 @@ export class MediaController {
     this.mediaDevices = mediaDevices;
     this.onStateChange = onStateChange;
     this.tracks = { audio: null, video: null };
-    this.state = { audio: 'off', video: 'off', micEnabled: false, audioError: null, videoError: null };
+    this.state = { audio: 'off', video: 'off', micEnabled: false, cameraEnabled: false, audioError: null, videoError: null };
     this.disposed = false;
     this.generations = { audio: 0, video: 0 };
     this.queues = { audio: Promise.resolve(), video: Promise.resolve() };
+    this.trackListeners = new Set();
   }
 
   start() {
@@ -54,6 +55,20 @@ export class MediaController {
     return true;
   }
 
+  async setCameraEnabled(enabled) {
+    if (!enabled) {
+      this.stopVideo();
+      return true;
+    }
+    const track = await this.startVideo();
+    return Boolean(track);
+  }
+
+  subscribeTrackChanges(listener) {
+    this.trackListeners.add(listener);
+    return () => this.trackListeners.delete(listener);
+  }
+
   dispose() {
     if (this.disposed) return;
     this.disposed = true;
@@ -61,7 +76,7 @@ export class MediaController {
     this.generations.video += 1;
     this.#stopTrack('audio');
     this.#stopTrack('video');
-    this.#setState({ audio: 'off', video: 'off', micEnabled: false });
+    this.#setState({ audio: 'off', video: 'off', micEnabled: false, cameraEnabled: false });
   }
 
   #scheduleCapture(kind, constraints) {
@@ -74,12 +89,14 @@ export class MediaController {
   #stop(kind) {
     this.generations[kind] += 1;
     this.#stopTrack(kind);
-    this.#setState({ [kind]: 'off', ...(kind === 'audio' ? { micEnabled: false } : {}), [`${kind}Error`]: null });
+    this.#setState({ [kind]: 'off', ...(kind === 'audio' ? { micEnabled: false } : { cameraEnabled: false }), [`${kind}Error`]: null });
   }
 
   #stopTrack(kind) {
-    this.tracks[kind]?.stop();
+    if (!this.tracks[kind]) return;
+    this.tracks[kind].stop();
     this.tracks[kind] = null;
+    this.#notifyTrackChange(kind, null);
   }
 
   async #capture(kind, constraints, generation) {
@@ -96,10 +113,11 @@ export class MediaController {
       this.#stopTrack(kind);
       this.tracks[kind] = track;
       if (kind === 'audio') track.enabled = true;
-      this.#setState({ [kind]: 'on', ...(kind === 'audio' ? { micEnabled: true } : {}) });
+      this.#notifyTrackChange(kind, track);
+      this.#setState({ [kind]: 'on', ...(kind === 'audio' ? { micEnabled: true } : { cameraEnabled: true }) });
       return track;
     } catch (error) {
-      if (!this.disposed && generation === this.generations[kind]) this.#setState({ [kind]: 'off', ...(kind === 'audio' ? { micEnabled: false } : {}), [`${kind}Error`]: error.name ?? 'MediaError' });
+      if (!this.disposed && generation === this.generations[kind]) this.#setState({ [kind]: 'off', ...(kind === 'audio' ? { micEnabled: false } : { cameraEnabled: false }), [`${kind}Error`]: error.name ?? 'MediaError' });
       return null;
     }
   }
@@ -107,5 +125,9 @@ export class MediaController {
   #setState(update) {
     this.state = { ...this.state, ...update };
     this.onStateChange(this.getState());
+  }
+
+  #notifyTrackChange(kind, track) {
+    for (const listener of this.trackListeners) listener({ kind, track });
   }
 }

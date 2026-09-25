@@ -59,6 +59,27 @@ describe('MediaController', () => {
     expect(controller.getState().micEnabled).toBe(false);
   });
 
+  it('stops video on camera off, recaptures a fresh track on on, and notifies peer subscribers', async () => {
+    const first = stream('video');
+    const second = stream('video');
+    const streams = [first, second];
+    const changes = [];
+    const controller = new MediaController({ mediaDevices: { getUserMedia: async () => streams.shift() } });
+    controller.subscribeTrackChanges((change) => changes.push(change));
+    await controller.setCameraEnabled(true);
+    await controller.setCameraEnabled(false);
+    await controller.setCameraEnabled(true);
+
+    expect(first.track.stopCalls).toBe(1);
+    expect(controller.getTrack('video')).toBe(second.track);
+    expect(controller.getState()).toMatchObject({ video: 'on', cameraEnabled: true });
+    expect(changes).toEqual([
+      { kind: 'video', track: first.track },
+      { kind: 'video', track: null },
+      { kind: 'video', track: second.track },
+    ]);
+  });
+
   it('stops a late stream after disposal instead of reviving the device state', async () => {
     let resolveCapture;
     const late = stream('video');
