@@ -94,6 +94,30 @@ describe('MediaController', () => {
     expect(controller.getState().video).toBe('off');
   });
 
+  it('marks an unexpectedly ended track off without reconnecting the room', async () => {
+    const audio = stream('audio');
+    const controller = new MediaController({ mediaDevices: { getUserMedia: async () => audio } });
+    await controller.startAudio();
+    audio.track.onended();
+
+    expect(controller.getState()).toMatchObject({ audio: 'off', micEnabled: false, audioError: 'DEVICE_ENDED' });
+    expect(controller.getTrack('audio')).toBeNull();
+  });
+
+  it('retries an overconstrained capture once with basic constraints', async () => {
+    const video = stream('video');
+    const calls = [];
+    const controller = new MediaController({ mediaDevices: { getUserMedia: async (constraints) => {
+      calls.push(constraints);
+      if (calls.length === 1) throw Object.assign(new Error('constraint'), { name: 'OverconstrainedError' });
+      return video;
+    } } });
+    await controller.startVideo();
+
+    expect(calls).toEqual([{ audio: false, video: VIDEO_CONSTRAINTS }, { audio: false, video: true }]);
+    expect(controller.getState().video).toBe('on');
+  });
+
   it('invalidates a pending capture when the user stops that device', async () => {
     let resolveCapture;
     const late = stream('audio');

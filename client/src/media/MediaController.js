@@ -94,8 +94,10 @@ export class MediaController {
 
   #stopTrack(kind) {
     if (!this.tracks[kind]) return;
-    this.tracks[kind].stop();
+    const track = this.tracks[kind];
     this.tracks[kind] = null;
+    track.onended = null;
+    track.stop();
     this.#notifyTrackChange(kind, null);
   }
 
@@ -112,11 +114,15 @@ export class MediaController {
       if (!track) throw new Error(`No ${kind} track returned.`);
       this.#stopTrack(kind);
       this.tracks[kind] = track;
+      track.onended = () => this.#handleTrackEnded(kind, track);
       if (kind === 'audio') track.enabled = true;
       this.#notifyTrackChange(kind, track);
       this.#setState({ [kind]: 'on', ...(kind === 'audio' ? { micEnabled: true } : { cameraEnabled: true }) });
       return track;
     } catch (error) {
+      if (!this.disposed && generation === this.generations[kind] && error.name === 'OverconstrainedError' && constraints[kind] !== true) {
+        return this.#capture(kind, { audio: kind === 'audio', video: kind === 'video' }, generation);
+      }
       if (!this.disposed && generation === this.generations[kind]) this.#setState({ [kind]: 'off', ...(kind === 'audio' ? { micEnabled: false } : { cameraEnabled: false }), [`${kind}Error`]: error.name ?? 'MediaError' });
       return null;
     }
@@ -129,5 +135,13 @@ export class MediaController {
 
   #notifyTrackChange(kind, track) {
     for (const listener of this.trackListeners) listener({ kind, track });
+  }
+
+  #handleTrackEnded(kind, track) {
+    if (this.disposed || this.tracks[kind] !== track) return;
+    this.generations[kind] += 1;
+    this.tracks[kind] = null;
+    this.#notifyTrackChange(kind, null);
+    this.#setState({ [kind]: 'off', ...(kind === 'audio' ? { micEnabled: false } : { cameraEnabled: false }), [`${kind}Error`]: 'DEVICE_ENDED' });
   }
 }
