@@ -1,8 +1,12 @@
 import {
   ERROR_CODES,
+  MAX_ICE_BYTES,
+  MAX_INCOMING_PAYLOAD_BYTES,
+  MAX_SDP_BYTES,
   PROTOCOL_VERSION,
   createErrorAck,
   createSuccessAck,
+  validatePayloadSize,
   validateRequestEnvelope,
 } from '@video-chat/shared';
 import { RegistryError } from '../rooms/RoomRegistry.js';
@@ -45,6 +49,11 @@ export function registerHandlers(socket, registry, io, { slowConsumerGuard }) {
       if (!validation.ok) {
         const code = request?.v !== PROTOCOL_VERSION ? ERROR_CODES.PROTOCOL_MISMATCH : ERROR_CODES.INVALID_REQUEST;
         acknowledge(requestError(requestId, code, validation.reason));
+        return;
+      }
+      const payloadSize = validatePayloadSize(request, MAX_INCOMING_PAYLOAD_BYTES);
+      if (!payloadSize.ok) {
+        acknowledge(requestError(requestId, ERROR_CODES.INVALID_REQUEST, payloadSize.reason));
         return;
       }
       if (requestCache.has(requestId)) {
@@ -131,7 +140,7 @@ export function registerHandlers(socket, registry, io, { slowConsumerGuard }) {
   });
 
   handle('signal:description', ({ roomEpoch, toParticipantId, description }) => {
-    if (!description || !['offer', 'answer'].includes(description.type) || typeof description.sdp !== 'string' || description.sdp.length > 64 * 1024) {
+    if (!description || !['offer', 'answer'].includes(description.type) || typeof description.sdp !== 'string' || Buffer.byteLength(description.sdp) > MAX_SDP_BYTES) {
       throw new RegistryError(ERROR_CODES.INVALID_REQUEST, 'Invalid SDP description.');
     }
     const route = registry.getSignalRoute({ socketId: socket.id, roomEpoch, toParticipantId });
@@ -140,7 +149,9 @@ export function registerHandlers(socket, registry, io, { slowConsumerGuard }) {
   });
 
   handle('signal:candidate', ({ roomEpoch, toParticipantId, iceUfrag, candidate }) => {
-    if (typeof iceUfrag !== 'string' || !(candidate === null || typeof candidate === 'object')) throw new RegistryError(ERROR_CODES.INVALID_REQUEST, 'Invalid ICE candidate.');
+    if (typeof iceUfrag !== 'string' || !(candidate === null || (typeof candidate === 'object' && !Array.isArray(candidate))) || (candidate !== null && !validatePayloadSize(candidate, MAX_ICE_BYTES).ok)) {
+      throw new RegistryError(ERROR_CODES.INVALID_REQUEST, 'Invalid ICE candidate.');
+    }
     const route = registry.getSignalRoute({ socketId: socket.id, roomEpoch, toParticipantId });
     io.to(route.target.socketId).emit('signal:candidate', { v: PROTOCOL_VERSION, roomEpoch, fromParticipantId: route.fromParticipantId, iceUfrag, candidate });
     return { delivered: true };
