@@ -9,6 +9,7 @@ import { ChatPanel } from './components/ChatPanel.jsx';
 import { addPendingMessage, chatErrorMessage, markMessage, mergeChatEntries, mergeChatEntry } from './chat/chatState.js';
 import { loadHistoryPages } from './chat/historyLoader.js';
 import { checkBrowserEnvironment } from './environment/preflight.js';
+import { MediaController } from './media/MediaController.js';
 
 export function getRoomIdFromPath(pathname) {
   const match = /^\/room\/([^/]+)$/.exec(pathname);
@@ -37,6 +38,7 @@ export default function App() {
   const [participants, setParticipants] = useState([]);
   const [messages, setMessages] = useState([]);
   const [draft, setDraft] = useState('');
+  const [mediaState, setMediaState] = useState({ audio: 'off', video: 'off' });
   const sessionRef = useRef(null);
   const pendingParticipantEvents = useRef([]);
   const joiningRef = useRef(false);
@@ -52,6 +54,7 @@ export default function App() {
     setMessages([]);
     setDraft('');
     setCopyStatus('');
+    setMediaState({ audio: 'off', video: 'off' });
     setStatus('');
     if (clearName) setDisplayName('');
   }
@@ -104,10 +107,12 @@ export default function App() {
     }
 
     const client = new SignalingClient({ url: import.meta.env.VITE_SOCKET_URL });
+    const mediaController = new MediaController({ onStateChange: setMediaState });
     pendingParticipantEvents.current = [];
     joiningRef.current = true;
     const session = new RoomSession({
       signalingClient: client,
+      mediaController,
       onRoomEvent: (roomEvent) => {
         if (joiningRef.current) pendingParticipantEvents.current.push(roomEvent);
         setParticipants((current) => applyParticipantEvent(current, roomEvent));
@@ -133,6 +138,7 @@ export default function App() {
       pendingParticipantEvents.current = [];
       joiningRef.current = false;
       void loadRoomHistory(session, joined);
+      void mediaController.start();
       const nextPath = `/room/${joined.roomId}`;
       window.history.pushState({}, '', nextPath);
       setPathname(nextPath);
@@ -200,6 +206,7 @@ export default function App() {
           <p className="eyebrow">Вы в комнате</p>
           <h1>Video Chat</h1>
           <p>Участники комнаты</p>
+          <p className="media-status">{mediaState.audio === 'pending' ? 'Подключаем микрофон…' : mediaState.audio === 'on' ? 'Микрофон включён' : 'Микрофон недоступен'} · {mediaState.video === 'pending' ? 'Подключаем камеру…' : mediaState.video === 'on' ? 'Камера включена' : 'Камера недоступна'}</p>
           <ParticipantGrid participants={participants} selfParticipantId={snapshot.selfParticipantId} />
           <ChatPanel messages={messages} draft={draft} onDraftChange={setDraft} onSend={sendMessage} onRetry={(message) => sendMessage(message.text, message)} />
           <p className="room-code">{snapshot.roomId}</p>

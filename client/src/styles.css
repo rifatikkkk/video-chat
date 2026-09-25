@@ -29,6 +29,7 @@ a { display: inline-block; margin-top: 1.2rem; color: #b8d8ff; }
 .chat-message header { display: flex; justify-content: space-between; gap: .5rem; }
 .chat-message p { margin: .35rem 0; overflow-wrap: anywhere; white-space: pre-wrap; }
 .system-message { color: #aab3c8; font-style: italic; }
+.media-status { padding: .6rem .75rem; border-radius: .5rem; background: #171c27; font-size: .9rem; }
 .chat-message small { color: #ffcf8c; }
 .chat-message--error small { color: #ffb4ab; }
 .chat-message button { margin-top: .5rem; padding: .4rem .6rem; }
