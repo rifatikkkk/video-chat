@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { validateDisplayName, validateRoomId } from '@video-chat/shared';
 import { RoomSession } from './session/RoomSession.js';
 import { SignalingClient } from './socket/SignalingClient.js';
+import { copyInvitation } from './clipboard/invitation.js';
 
 export function getRoomIdFromPath(pathname) {
   const match = /^\/room\/([^/]+)$/.exec(pathname);
@@ -21,6 +22,7 @@ export default function App() {
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');
   const [snapshot, setSnapshot] = useState(null);
+  const [copyStatus, setCopyStatus] = useState('');
   const sessionRef = useRef(null);
   const roomId = getRoomIdFromPath(pathname);
   const validRoomId = roomId === null || validateRoomId(roomId).ok;
@@ -79,6 +81,15 @@ export default function App() {
     setStatus('');
   }
 
+  async function copyRoomUrl() {
+    try {
+      await copyInvitation(navigator.clipboard, window.location.href);
+      setCopyStatus('Ссылка скопирована.');
+    } catch {
+      setCopyStatus('Не удалось скопировать автоматически. Скопируйте ссылку вручную.');
+    }
+  }
+
   if (snapshot) {
     return (
       <main className="app-shell">
@@ -87,6 +98,9 @@ export default function App() {
           <h1>Video Chat</h1>
           <p>Комната подключена. Интерфейс участников, чат и медиа появятся в следующих задачах.</p>
           <p className="room-code">{snapshot.roomId}</p>
+          <button type="button" onClick={copyRoomUrl}>Скопировать приглашение</button>
+          {copyStatus && <p className={copyStatus === 'Ссылка скопирована.' ? 'success' : 'error'} role="status">{copyStatus}</p>}
+          {copyStatus.startsWith('Не удалось') && <input className="invite-url" aria-label="Ссылка-приглашение для ручного копирования" readOnly value={window.location.href} onFocus={(event) => event.target.select()} autoFocus />}
           <button type="button" onClick={leave}>Выйти</button>
         </section>
       </main>

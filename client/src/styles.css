@@ -13,4 +13,6 @@ button { border: 0; border-radius: .5rem; padding: .75rem 1rem; color: #08101d; 
 button:disabled, input:disabled { cursor: wait; opacity: .65; }
 a { display: inline-block; margin-top: 1.2rem; color: #b8d8ff; }
 .error { color: #ffb4ab; }
+.success { color: #a9e6c1; }
 .room-code { overflow-wrap: anywhere; color: #91c5ff; font-family: ui-monospace, monospace; }
+.invite-url { box-sizing: border-box; width: 100%; margin: .4rem 0 1rem; }
