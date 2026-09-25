@@ -95,6 +95,20 @@ export function registerHandlers(socket, registry, io) {
     registry.getHistory({ socketId: socket.id, roomEpoch, throughSeq, afterSeq, limit })
   ));
 
+  handle('media:update', ({ roomEpoch, revision, micEnabled, cameraEnabled }) => {
+    const result = registry.updateMedia({ socketId: socket.id, roomEpoch, revision, micEnabled, cameraEnabled });
+    if (result.changed) {
+      emitRoomEvent(io, result.room, 'media-updated', {
+        entry: result.entry,
+        participantId: result.participant.participantId,
+        micEnabled: result.participant.micEnabled,
+        cameraEnabled: result.participant.cameraEnabled,
+        mediaRevision: result.participant.mediaRevision,
+      });
+    }
+    return { changed: result.changed };
+  });
+
   socket.on('disconnect', () => {
     const result = registry.leave({ socketId: socket.id });
     if (result.left) {
