@@ -114,7 +114,9 @@ export default function App() {
 
     const client = new SignalingClient({ url: import.meta.env.VITE_SOCKET_URL });
     const mediaController = new MediaController({ onStateChange: setMediaState });
-    const peerManager = new PeerManager();
+    const peerManager = new PeerManager({
+      sendDescription: (payload) => client.request('signal:description', payload),
+    });
     mediaControllerRef.current = mediaController;
     pendingParticipantEvents.current = [];
     joiningRef.current = true;
