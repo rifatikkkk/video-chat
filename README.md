@@ -24,6 +24,8 @@ npm run dev:client # только React/Vite
 npm run dev:server # только Node.js/Socket.IO
 npm run build      # production-сборка клиента для Chrome, Firefox и Edge 100+
 npm run start      # запуск сервера без watch-режима
+npm run lint       # статическая проверка JavaScript и JSX
+npm test           # unit и Socket.IO integration-проверки
 ```
 
 Проект организован как npm workspaces: `client`, `server` и `shared`.

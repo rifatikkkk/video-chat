@@ -2,6 +2,7 @@
   "name": "video-chat-room",
   "private": true,
   "version": "0.1.0",
+  "type": "module",
   "description": "Video Chat Room — React, Node.js, Socket.IO and WebRTC",
   "engines": {
     "node": ">=22.0.0",
@@ -18,9 +19,17 @@
     "dev:server": "npm run dev --workspace @video-chat/server",
     "dev:client": "npm run dev --workspace @video-chat/client",
     "build": "npm run build --workspace @video-chat/client",
-    "start": "npm run start --workspace @video-chat/server"
+    "start": "npm run start --workspace @video-chat/server",
+    "lint": "eslint .",
+    "test": "npm run test:unit && npm run test:integration",
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration"
   },
   "devDependencies": {
-    "concurrently": "^9.2.1"
+    "concurrently": "^9.2.1",
+    "eslint": "^9.34.0",
+    "eslint-plugin-react": "^7.37.5",
+    "globals": "^16.3.0",
+    "vitest": "^3.2.4"
   }
 }
