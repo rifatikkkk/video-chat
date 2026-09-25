@@ -205,6 +205,17 @@ export class RoomRegistry {
     return { room, participant, entry, changed: true };
   }
 
+  getSignalRoute({ socketId, roomEpoch, toParticipantId }) {
+    const membership = this.socketIndex.get(socketId);
+    if (!membership) throw new RegistryError(ERROR_CODES.NOT_JOINED, 'Socket is not in a room.');
+    const room = this.rooms.get(membership.roomId);
+    if (!room || room.epoch !== roomEpoch) throw new RegistryError(ERROR_CODES.STALE_ROOM, 'Room epoch does not match the active session.');
+    if (toParticipantId === membership.participantId) throw new RegistryError(ERROR_CODES.INVALID_REQUEST, 'Signal cannot target its sender.');
+    const target = room.participants.get(toParticipantId);
+    if (!target) throw new RegistryError(ERROR_CODES.PEER_NOT_FOUND, 'Target participant is not in this room.');
+    return { room, fromParticipantId: membership.participantId, target };
+  }
+
   #validateJoinInput({ socketId, displayName }) {
     const validatedName = validateDisplayName(displayName);
     if (!validatedName.ok) throw new RegistryError(ERROR_CODES.INVALID_NAME, validatedName.reason);
