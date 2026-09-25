@@ -206,4 +206,65 @@ describe('Socket.IO integration harness', () => {
       slow.close();
     }
   });
+
+  it('keeps room history, media, chat, and signaling isolated between rooms', async () => {
+    const url = await startIsolatedServer();
+    const anna = createClient(url, { transports: ['websocket'], forceNew: true });
+    const boris = createClient(url, { transports: ['websocket'], forceNew: true });
+    const vera = createClient(url, { transports: ['websocket'], forceNew: true });
+    const guest = createClient(url, { transports: ['websocket'], forceNew: true });
+
+    try {
+      const waitReady = (client) => new Promise((resolve, reject) => { client.once('server:ready', resolve); client.once('connect_error', reject); });
+      await Promise.all([waitReady(anna), waitReady(boris), waitReady(vera), waitReady(guest)]);
+      const roomA = await anna.emitWithAck('room:create', { v: 1, requestId: crypto.randomUUID(), displayName: 'Анна' });
+      const borisRoomA = await boris.emitWithAck('room:join', { v: 1, requestId: crypto.randomUUID(), roomId: roomA.data.roomId, displayName: 'Борис' });
+      const roomB = await vera.emitWithAck('room:create', { v: 1, requestId: crypto.randomUUID(), displayName: 'Вера' });
+      const publicJoin = await guest.emitWithAck('room:join', { v: 1, requestId: crypto.randomUUID(), roomId: roomA.data.roomId, displayName: 'Гость' });
+      const veraEvents = [];
+      const borisSignals = [];
+      vera.on('room:event', (event) => veraEvents.push(event));
+      vera.on('signal:description', (event) => veraEvents.push(event));
+      boris.on('signal:description', (event) => borisSignals.push(event));
+
+      const chat = await anna.emitWithAck('chat:send', {
+        v: 1, requestId: crypto.randomUUID(), roomEpoch: roomA.data.roomEpoch, clientMessageId: crypto.randomUUID(), text: 'Только комната A', senderParticipantId: roomB.data.selfParticipantId,
+      });
+      const foreignHistory = await vera.emitWithAck('history:get', {
+        v: 1, requestId: crypto.randomUUID(), roomEpoch: roomA.data.roomEpoch, throughSeq: 99, afterSeq: 0, limit: 50,
+      });
+      const foreignMedia = await vera.emitWithAck('media:update', {
+        v: 1, requestId: crypto.randomUUID(), roomEpoch: roomA.data.roomEpoch, revision: 1, micEnabled: true, cameraEnabled: true,
+      });
+      const crossRoomSignal = await anna.emitWithAck('signal:description', {
+        v: 1, requestId: crypto.randomUUID(), roomEpoch: roomA.data.roomEpoch, toParticipantId: roomB.data.selfParticipantId, description: { type: 'offer', sdp: 'valid' }, fromParticipantId: roomB.data.selfParticipantId,
+      });
+      const validSignal = await anna.emitWithAck('signal:description', {
+        v: 1, requestId: crypto.randomUUID(), roomEpoch: roomA.data.roomEpoch, toParticipantId: borisRoomA.data.selfParticipantId, description: { type: 'offer', sdp: 'valid' }, fromParticipantId: roomB.data.selfParticipantId,
+      });
+      const invalidSdp = await anna.emitWithAck('signal:description', {
+        v: 1, requestId: crypto.randomUUID(), roomEpoch: roomA.data.roomEpoch, toParticipantId: borisRoomA.data.selfParticipantId, description: { type: 'offer', sdp: 'ы'.repeat(64 * 1024) },
+      });
+      const invalidCandidate = await anna.emitWithAck('signal:candidate', {
+        v: 1, requestId: crypto.randomUUID(), roomEpoch: roomA.data.roomEpoch, toParticipantId: borisRoomA.data.selfParticipantId, iceUfrag: 'x', candidate: { candidate: 'x'.repeat(5 * 1024) },
+      });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+
+      expect(chat).toMatchObject({ ok: true, data: { entry: { participantId: roomA.data.selfParticipantId } } });
+      expect(publicJoin).toMatchObject({ ok: true, data: { roomId: roomA.data.roomId } });
+      expect(foreignHistory).toMatchObject({ ok: false, error: { code: 'STALE_ROOM' } });
+      expect(foreignMedia).toMatchObject({ ok: false, error: { code: 'STALE_ROOM' } });
+      expect(crossRoomSignal).toMatchObject({ ok: false, error: { code: 'PEER_NOT_FOUND' } });
+      expect(validSignal).toMatchObject({ ok: true, data: { delivered: true } });
+      expect(borisSignals).toEqual([expect.objectContaining({ fromParticipantId: roomA.data.selfParticipantId })]);
+      expect(invalidSdp).toMatchObject({ ok: false, error: { code: 'INVALID_REQUEST' } });
+      expect(invalidCandidate).toMatchObject({ ok: false, error: { code: 'INVALID_REQUEST' } });
+      expect(veraEvents).toEqual([]);
+    } finally {
+      anna.close();
+      boris.close();
+      vera.close();
+      guest.close();
+    }
+  });
 });
