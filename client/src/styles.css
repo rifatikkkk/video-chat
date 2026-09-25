@@ -1,0 +1,15 @@
+:root {
+  font-family: Inter, system-ui, sans-serif;
+  color: #f7f7fb;
+  background: #151821;
+}
+
+body { margin: 0; }
+
+.app-shell {
+  display: grid;
+  min-height: 100vh;
+  place-content: center;
+  padding: 2rem;
+  text-align: center;
+}
