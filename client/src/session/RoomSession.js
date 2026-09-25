@@ -1,3 +1,5 @@
+import { SessionEventBuffer } from './SessionEventBuffer.js';
+
 export const SESSION_STATES = Object.freeze({
   IDLE: 'idle',
   CONNECTING: 'connecting',
@@ -8,7 +10,7 @@ export const SESSION_STATES = Object.freeze({
 });
 
 export class RoomSession {
-  constructor({ signalingClient, mediaController = {}, peerManager = {}, page = globalThis } = {}) {
+  constructor({ signalingClient, mediaController = {}, peerManager = {}, page = globalThis, onRoomEvent, onSignal } = {}) {
     if (!signalingClient) throw new TypeError('signalingClient is required.');
     this.signalingClient = signalingClient;
     this.mediaController = mediaController;
@@ -19,7 +21,12 @@ export class RoomSession {
     this.listeners = new Set();
     this.cleaningUp = null;
     this.cleaned = false;
+    this.earlyEventError = null;
+    this.eventBuffer = new SessionEventBuffer({ onRoomEvent, onSignal });
     this.unsubscribeDisconnect = this.signalingClient.on('disconnect', () => { void this.dispose({ sendLeave: false }); });
+    this.unsubscribeRoomEvent = this.signalingClient.on('room:event', (event) => this.#receiveEarlyEvent('room', event));
+    this.unsubscribeSignalDescription = this.signalingClient.on('signal:description', (event) => this.#receiveEarlyEvent('signal', event));
+    this.unsubscribeSignalCandidate = this.signalingClient.on('signal:candidate', (event) => this.#receiveEarlyEvent('signal', event));
     this.onPageHide = () => { void this.dispose(); };
     this.onPageShow = (event) => {
       if (event.persisted) void this.dispose({ sendLeave: false });
@@ -45,7 +52,9 @@ export class RoomSession {
         error.code = response?.error?.code;
         throw error;
       }
+      if (this.earlyEventError) throw this.earlyEventError;
       this.snapshot = response.data;
+      this.eventBuffer.applySnapshot(this.snapshot);
       this.#setState(SESSION_STATES.ACTIVE);
       return this.snapshot;
     } catch (error) {
@@ -93,6 +102,12 @@ export class RoomSession {
   #removeLifecycleListeners() {
     this.unsubscribeDisconnect?.();
     this.unsubscribeDisconnect = null;
+    this.unsubscribeRoomEvent?.();
+    this.unsubscribeRoomEvent = null;
+    this.unsubscribeSignalDescription?.();
+    this.unsubscribeSignalDescription = null;
+    this.unsubscribeSignalCandidate?.();
+    this.unsubscribeSignalCandidate = null;
     this.page.removeEventListener?.('pagehide', this.onPageHide);
     this.page.removeEventListener?.('pageshow', this.onPageShow);
   }
@@ -100,5 +115,13 @@ export class RoomSession {
   #setState(state) {
     this.state = state;
     for (const listener of this.listeners) listener(state);
+  }
+
+  #receiveEarlyEvent(type, event) {
+    const result = type === 'room' ? this.eventBuffer.receiveRoomEvent(event) : this.eventBuffer.receiveSignal(event);
+    if (result.overflowed) {
+      this.earlyEventError = new Error('Too many events arrived before room join completed.');
+      void this.dispose({ sendLeave: false });
+    }
   }
 }
