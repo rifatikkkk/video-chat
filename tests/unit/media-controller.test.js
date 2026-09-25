@@ -38,6 +38,27 @@ describe('MediaController', () => {
     expect(audio.track.stopCalls).toBe(1);
   });
 
+  it('toggles a live microphone without a new capture and recaptures it when absent', async () => {
+    const audio = stream('audio');
+    const calls = [];
+    const controller = new MediaController({ mediaDevices: { getUserMedia: async (constraints) => { calls.push(constraints); return audio; } } });
+    await controller.startAudio();
+    await controller.setMicEnabled(false);
+    await controller.setMicEnabled(true);
+
+    expect(audio.track.enabled).toBe(true);
+    expect(calls).toHaveLength(1);
+    controller.stopAudio();
+    await controller.setMicEnabled(true);
+    expect(calls).toHaveLength(2);
+  });
+
+  it('does not report microphone enabled if recapture fails', async () => {
+    const controller = new MediaController({ mediaDevices: { getUserMedia: async () => { throw new Error('unavailable'); } } });
+    await expect(controller.setMicEnabled(true)).resolves.toBe(false);
+    expect(controller.getState().micEnabled).toBe(false);
+  });
+
   it('stops a late stream after disposal instead of reviving the device state', async () => {
     let resolveCapture;
     const late = stream('video');
