@@ -59,4 +59,36 @@ describe('RoomRegistry model', () => {
 
     expect(() => registry.join({ roomId: 'room_two', socketId: 'same-socket', displayName: 'Анна' })).toThrow(/already belongs/);
   });
+
+  it('makes leave idempotent and produces exactly one leave entry', () => {
+    const registry = new RoomRegistry();
+    const joined = registry.join({ roomId: 'room_leave', socketId: 'socket-1', displayName: 'Анна' });
+
+    const first = registry.leave({ socketId: 'socket-1', roomEpoch: joined.room.epoch });
+    const second = registry.leave({ socketId: 'socket-1', roomEpoch: joined.room.epoch });
+
+    expect(first).toMatchObject({ left: true, entry: { type: 'leave', participantId: joined.participant.participantId } });
+    expect(second).toEqual({ left: false, entry: null });
+    expect(joined.room.history.filter((entry) => entry.type === 'leave')).toHaveLength(1);
+  });
+
+  it('cleans every index after the last participant leaves and recreates a new epoch', () => {
+    const registry = new RoomRegistry();
+    const first = registry.join({ roomId: 'same_room', socketId: 'socket-1', displayName: 'Анна' });
+    registry.leave({ socketId: 'socket-1', roomEpoch: first.room.epoch });
+
+    expect(registry.getRoom('same_room')).toBeUndefined();
+    expect(registry.getMembership('socket-1')).toBeUndefined();
+    const second = registry.join({ roomId: 'same_room', socketId: 'socket-2', displayName: 'Борис' });
+    expect(second.room.epoch).not.toBe(first.room.epoch);
+    expect(second.room.history).toHaveLength(1);
+  });
+
+  it('does not remove an active session when a stale epoch is supplied', () => {
+    const registry = new RoomRegistry();
+    const joined = registry.join({ roomId: 'stale_room', socketId: 'socket-1', displayName: 'Анна' });
+
+    expect(() => registry.leave({ socketId: 'socket-1', roomEpoch: crypto.randomUUID() })).toThrow(/epoch/);
+    expect(registry.getMembership('socket-1')).toMatchObject({ epoch: joined.room.epoch });
+  });
 });
