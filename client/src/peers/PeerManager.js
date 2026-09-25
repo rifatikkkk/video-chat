@@ -3,9 +3,10 @@ export const PEER_CONNECTION_CONFIG = Object.freeze({
 });
 
 export class PeerManager {
-  constructor({ peerConnectionFactory = (config) => new RTCPeerConnection(config), maxPeers = 3 } = {}) {
+  constructor({ peerConnectionFactory = (config) => new RTCPeerConnection(config), maxPeers = 3, sendDescription = async () => {} } = {}) {
     this.peerConnectionFactory = peerConnectionFactory;
     this.maxPeers = maxPeers;
+    this.sendDescription = sendDescription;
     this.roomEpoch = null;
     this.selfParticipantId = null;
     this.peers = new Map();
@@ -37,6 +38,7 @@ export class PeerManager {
     const peer = this.peers.get(event.fromParticipantId);
     if (!peer) return null;
     this.signalLog.push(event);
+    if (event.description) this.#queuePeerOperation(peer, () => this.#handleDescription(peer, event.description));
     return peer;
   }
 
@@ -53,8 +55,11 @@ export class PeerManager {
       connection,
       offerer: this.selfParticipantId < remoteParticipantId,
       polite: this.selfParticipantId > remoteParticipantId,
+      negotiationStarted: false,
+      operationQueue: Promise.resolve(),
     };
     this.peers.set(remoteParticipantId, peer);
+    if (peer.offerer) this.#queuePeerOperation(peer, () => this.#startOffer(peer));
     return peer;
   }
 
@@ -92,5 +97,44 @@ export class PeerManager {
 
   #isCurrentEpoch(roomEpoch) {
     return Boolean(roomEpoch && roomEpoch === this.roomEpoch);
+  }
+
+  #queuePeerOperation(peer, operation) {
+    peer.operationQueue = peer.operationQueue.catch(() => null).then(async () => {
+      if (this.peers.get(peer.remoteParticipantId) !== peer) return;
+      await operation();
+    });
+    return peer.operationQueue;
+  }
+
+  async #startOffer(peer) {
+    if (peer.negotiationStarted) return;
+    peer.negotiationStarted = true;
+    peer.connection.addTransceiver('audio', { direction: 'sendrecv' });
+    peer.connection.addTransceiver('video', { direction: 'sendrecv' });
+    const offer = await peer.connection.createOffer();
+    await peer.connection.setLocalDescription(offer);
+    await this.#sendDescription(peer, peer.connection.localDescription ?? offer);
+  }
+
+  async #handleDescription(peer, description) {
+    if (description.type === 'offer') {
+      await peer.connection.setRemoteDescription(description);
+      const answer = await peer.connection.createAnswer();
+      await peer.connection.setLocalDescription(answer);
+      await this.#sendDescription(peer, peer.connection.localDescription ?? answer);
+      return;
+    }
+    if (description.type === 'answer') {
+      await peer.connection.setRemoteDescription(description);
+    }
+  }
+
+  async #sendDescription(peer, description) {
+    await this.sendDescription({
+      roomEpoch: peer.roomEpoch,
+      toParticipantId: peer.remoteParticipantId,
+      description,
+    });
   }
 }
