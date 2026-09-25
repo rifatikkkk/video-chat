@@ -8,7 +8,7 @@ function createFakeClient() {
     connect: async () => { client.connectCalls += 1; },
     request: async (event, payload) => {
       client.requests.push({ event, payload });
-      if (event === 'room:create') return { ok: true, data: { roomId: 'room', roomEpoch: 'epoch' } };
+      if (event === 'room:create') return { ok: true, data: { roomId: 'room', roomEpoch: 'epoch', selfParticipantId: 'self', participants: [{ participantId: 'self' }], snapshotSeq: 0 } };
       return { ok: true, data: { left: true } };
     },
     disconnect: () => { client.disconnectCalls += 1; },
@@ -42,7 +42,7 @@ describe('RoomSession', () => {
 
     const snapshot = await session.join({ displayName: 'Анна' });
 
-    expect(snapshot).toEqual({ roomId: 'room', roomEpoch: 'epoch' });
+    expect(snapshot).toEqual({ roomId: 'room', roomEpoch: 'epoch', selfParticipantId: 'self', participants: [{ participantId: 'self' }], snapshotSeq: 0 });
     expect(states).toEqual([SESSION_STATES.CONNECTING, SESSION_STATES.JOINING, SESSION_STATES.ACTIVE]);
     expect(client.connectCalls).toBe(1);
     expect(client.requests).toEqual([{ event: 'room:create', payload: { displayName: 'Анна' } }]);
@@ -81,5 +81,30 @@ describe('RoomSession', () => {
     expect(client.requests.filter(({ event }) => event === 'room:leave')).toHaveLength(0);
     page.trigger('pageshow', { persisted: true });
     expect(client.connectCalls).toBe(1);
+  });
+
+  it('syncs peer lifecycle from snapshot, room events, and signals', async () => {
+    const client = createFakeClient();
+    const page = createPage();
+    const calls = [];
+    const peerManager = {
+      applySnapshot: (snapshot) => calls.push(['snapshot', snapshot.roomEpoch]),
+      handleRoomEvent: (event) => calls.push(['room', event.kind]),
+      handleSignal: (event) => calls.push(['signal', event.fromParticipantId]),
+      dispose: () => calls.push(['dispose']),
+    };
+    const session = new RoomSession({ signalingClient: client, peerManager, page });
+
+    await session.join({ displayName: 'Анна' });
+    client.listeners.get('room:event')?.({ roomEpoch: 'epoch', seq: 1, kind: 'participant-joined', payload: { participant: { participantId: 'remote' } } });
+    client.listeners.get('signal:description')?.({ roomEpoch: 'epoch', fromParticipantId: 'remote', description: { type: 'offer', sdp: 'sdp' } });
+    await session.dispose();
+
+    expect(calls).toEqual([
+      ['snapshot', 'epoch'],
+      ['room', 'participant-joined'],
+      ['signal', 'remote'],
+      ['dispose'],
+    ]);
   });
 });

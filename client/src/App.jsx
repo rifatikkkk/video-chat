@@ -12,6 +12,7 @@ import { loadHistoryPages } from './chat/historyLoader.js';
 import { checkBrowserEnvironment } from './environment/preflight.js';
 import { MediaController } from './media/MediaController.js';
 import { SelfView } from './components/SelfView.jsx';
+import { PeerManager } from './peers/PeerManager.js';
 
 export function getRoomIdFromPath(pathname) {
   const match = /^\/room\/([^/]+)$/.exec(pathname);
@@ -113,12 +114,14 @@ export default function App() {
 
     const client = new SignalingClient({ url: import.meta.env.VITE_SOCKET_URL });
     const mediaController = new MediaController({ onStateChange: setMediaState });
+    const peerManager = new PeerManager();
     mediaControllerRef.current = mediaController;
     pendingParticipantEvents.current = [];
     joiningRef.current = true;
     const session = new RoomSession({
       signalingClient: client,
       mediaController,
+      peerManager,
       onRoomEvent: (roomEvent) => {
         if (joiningRef.current) pendingParticipantEvents.current.push(roomEvent);
         setParticipants((current) => applyParticipantEvent(current, roomEvent));
