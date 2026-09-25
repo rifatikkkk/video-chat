@@ -22,6 +22,13 @@ a { display: inline-block; margin-top: 1.2rem; color: #b8d8ff; }
 .participant-avatar { display: grid; width: 3rem; height: 3rem; place-items: center; border-radius: 50%; background: #39445d; font-size: 1.6rem; }
 .participant-meta { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
 .participant-tile p { margin: 0; font-size: .85rem; }
+.self-view { overflow: hidden; display: grid; gap: .75rem; margin: 1rem 0; border: 1px solid #4b5570; border-radius: .75rem; background: #171c27; }
+.self-view-video, .self-view-placeholder { width: 100%; aspect-ratio: 16 / 9; background: #0f131c; }
+.self-view-video { display: block; object-fit: cover; transform: scaleX(-1); }
+.self-view-placeholder { display: grid; place-items: center; color: #c6cada; font-size: 3rem; }
+.self-view-caption { display: flex; align-items: center; justify-content: space-between; gap: .75rem; padding: 0 1rem 1rem; }
+.self-view-caption span { color: #91c5ff; font-size: .85rem; font-weight: 700; text-transform: uppercase; }
+.media-controls { display: grid; gap: .65rem; margin: 1rem 0; }
 .chat-panel { margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid #3a4051; }
 .chat-panel h2 { margin: 0 0 .75rem; }
 .chat-messages { display: grid; gap: .6rem; max-height: 18rem; overflow: auto; }
@@ -30,6 +37,7 @@ a { display: inline-block; margin-top: 1.2rem; color: #b8d8ff; }
 .chat-message p { margin: .35rem 0; overflow-wrap: anywhere; white-space: pre-wrap; }
 .system-message { color: #aab3c8; font-style: italic; }
 .media-status { padding: .6rem .75rem; border-radius: .5rem; background: #171c27; font-size: .9rem; }
+.media-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; }
 .chat-message small { color: #ffcf8c; }
 .chat-message--error small { color: #ffb4ab; }
 .chat-message button { margin-top: .5rem; padding: .4rem .6rem; }

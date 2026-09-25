@@ -6,11 +6,12 @@ import { copyInvitation } from './clipboard/invitation.js';
 import { ParticipantGrid } from './components/ParticipantGrid.jsx';
 import { applyParticipantEvent } from './participants/participantState.js';
 import { ChatPanel } from './components/ChatPanel.jsx';
+import { MediaControls } from './components/MediaControls.jsx';
 import { addPendingMessage, chatErrorMessage, markMessage, mergeChatEntries, mergeChatEntry } from './chat/chatState.js';
 import { loadHistoryPages } from './chat/historyLoader.js';
 import { checkBrowserEnvironment } from './environment/preflight.js';
 import { MediaController } from './media/MediaController.js';
-import { mediaErrorMessage } from './media/mediaErrorMessage.js';
+import { SelfView } from './components/SelfView.jsx';
 
 export function getRoomIdFromPath(pathname) {
   const match = /^\/room\/([^/]+)$/.exec(pathname);
@@ -175,13 +176,24 @@ export default function App() {
     const nextMicEnabled = !mediaState.micEnabled;
     const applied = await mediaControllerRef.current?.setMicEnabled(nextMicEnabled);
     if (!applied || !sessionRef.current || !snapshot) return;
+    await publishMediaState({ micEnabled: nextMicEnabled, cameraEnabled: mediaState.cameraEnabled });
+  }
+
+  async function toggleCamera() {
+    const nextCameraEnabled = !mediaState.cameraEnabled;
+    const applied = await mediaControllerRef.current?.setCameraEnabled(nextCameraEnabled);
+    if (!applied || !sessionRef.current || !snapshot) return;
+    await publishMediaState({ micEnabled: mediaState.micEnabled, cameraEnabled: nextCameraEnabled });
+  }
+
+  async function publishMediaState({ micEnabled, cameraEnabled }) {
     const revision = ++mediaRevisionRef.current;
     try {
       const response = await sessionRef.current.signalingClient.request('media:update', {
         roomEpoch: snapshot.roomEpoch,
         revision,
-        micEnabled: nextMicEnabled,
-        cameraEnabled: mediaState.video === 'on',
+        micEnabled,
+        cameraEnabled,
       });
       if (!response.ok) throw new Error('Media update was rejected.');
     } catch {
@@ -230,10 +242,8 @@ export default function App() {
           <p className="eyebrow">Вы в комнате</p>
           <h1>Video Chat</h1>
           <p>Участники комнаты</p>
-          <p className="media-status">{mediaState.audio === 'pending' ? 'Подключаем микрофон…' : mediaState.micEnabled ? 'Микрофон включён' : 'Микрофон выключен'} · {mediaState.video === 'pending' ? 'Подключаем камеру…' : mediaState.video === 'on' ? 'Камера включена' : 'Камера недоступна'}</p>
-          {mediaState.audioError && <p className="error" role="status">{mediaErrorMessage(mediaState.audioError, 'audio')}</p>}
-          {mediaState.videoError && <p className="error" role="status">{mediaErrorMessage(mediaState.videoError, 'video')}</p>}
-          <button type="button" onClick={toggleMicrophone} disabled={mediaState.audio === 'pending'}>{mediaState.micEnabled ? 'Выключить микрофон' : 'Включить микрофон'}</button>
+          <SelfView displayName={displayName} videoTrack={mediaControllerRef.current?.getTrack('video') ?? null} />
+          <MediaControls mediaState={mediaState} onToggleMicrophone={toggleMicrophone} onToggleCamera={toggleCamera} />
           <ParticipantGrid participants={participants} selfParticipantId={snapshot.selfParticipantId} />
           <ChatPanel messages={messages} draft={draft} onDraftChange={setDraft} onSend={sendMessage} onRetry={(message) => sendMessage(message.text, message)} />
           <p className="room-code">{snapshot.roomId}</p>
