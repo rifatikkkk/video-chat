@@ -7,6 +7,7 @@ import {
 } from '@video-chat/shared';
 import { RegistryError } from '../rooms/RoomRegistry.js';
 import { toPublicParticipant } from '../rooms/RoomRegistry.js';
+import { TokenBucket } from './TokenBucket.js';
 
 const ERROR_MESSAGES = {
   [ERROR_CODES.PROTOCOL_MISMATCH]: 'Обновите страницу: версии клиента и сервера не совпадают.',
@@ -26,6 +27,13 @@ function emitRoomEvent(io, room, kind, payload) {
 
 export function registerHandlers(socket, registry, io) {
   const requestCache = new Map();
+  const buckets = new Map();
+  const limits = {
+    'chat:send': { rate: 2, burst: 10 },
+    'media:update': { rate: 10, burst: 20 },
+    'signal:description': { rate: 10, burst: 20 },
+    'signal:candidate': { rate: 100, burst: 300 },
+  };
 
   function handle(event, action) {
     socket.on(event, (request, acknowledge = () => {}) => {
@@ -39,6 +47,16 @@ export function registerHandlers(socket, registry, io) {
       if (requestCache.has(requestId)) {
         acknowledge(requestCache.get(requestId));
         return;
+      }
+      const limit = limits[event];
+      if (limit) {
+        const bucket = buckets.get(event) ?? new TokenBucket(limit);
+        buckets.set(event, bucket);
+        const allowance = bucket.take();
+        if (!allowance.ok) {
+          acknowledge(createErrorAck(requestId, ERROR_CODES.RATE_LIMITED, 'Слишком много запросов.', { retryAfterMs: allowance.retryAfterMs }));
+          return;
+        }
       }
 
       let response;
@@ -134,5 +152,6 @@ export function registerHandlers(socket, registry, io) {
       });
     }
     requestCache.clear();
+    buckets.clear();
   });
 }
