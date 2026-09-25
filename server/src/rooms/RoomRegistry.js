@@ -15,6 +15,10 @@ export function generateRoomId() {
   return randomBytes(ROOM_ID_BYTES).toString('base64url');
 }
 
+export function toPublicParticipant({ socketId: _socketId, joinedAt: _joinedAt, ...participant }) {
+  return participant;
+}
+
 export class RoomRegistry {
   constructor({ roomIdGenerator = generateRoomId, uuidGenerator = randomUUID } = {}) {
     this.rooms = new Map();
@@ -158,7 +162,7 @@ export class RoomRegistry {
         roomEpoch: room.epoch,
         selfParticipantId: participant.participantId,
         snapshotSeq: entry.seq,
-        participants: [...room.participants.values()].map(({ socketId: _socketId, joinedAt: _joinedAt, ...publicParticipant }) => publicParticipant),
+        participants: [...room.participants.values()].map(toPublicParticipant),
         historyThroughSeq: entry.seq,
       },
     };
