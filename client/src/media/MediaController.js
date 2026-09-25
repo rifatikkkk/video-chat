@@ -6,7 +6,7 @@ export class MediaController {
     this.mediaDevices = mediaDevices;
     this.onStateChange = onStateChange;
     this.tracks = { audio: null, video: null };
-    this.state = { audio: 'off', video: 'off', audioError: null, videoError: null };
+    this.state = { audio: 'off', video: 'off', micEnabled: false, audioError: null, videoError: null };
     this.disposed = false;
     this.generations = { audio: 0, video: 0 };
     this.queues = { audio: Promise.resolve(), video: Promise.resolve() };
@@ -40,6 +40,20 @@ export class MediaController {
     this.#stop('video');
   }
 
+  async setMicEnabled(enabled) {
+    if (!enabled) {
+      if (this.tracks.audio) this.tracks.audio.enabled = false;
+      this.#setState({ micEnabled: false });
+      return true;
+    }
+    const currentTrack = this.tracks.audio;
+    const track = currentTrack && currentTrack.readyState !== 'ended' ? currentTrack : await this.startAudio();
+    if (!track) return false;
+    track.enabled = true;
+    this.#setState({ micEnabled: true });
+    return true;
+  }
+
   dispose() {
     if (this.disposed) return;
     this.disposed = true;
@@ -47,7 +61,7 @@ export class MediaController {
     this.generations.video += 1;
     this.#stopTrack('audio');
     this.#stopTrack('video');
-    this.#setState({ audio: 'off', video: 'off' });
+    this.#setState({ audio: 'off', video: 'off', micEnabled: false });
   }
 
   #scheduleCapture(kind, constraints) {
@@ -60,7 +74,7 @@ export class MediaController {
   #stop(kind) {
     this.generations[kind] += 1;
     this.#stopTrack(kind);
-    this.#setState({ [kind]: 'off', [`${kind}Error`]: null });
+    this.#setState({ [kind]: 'off', ...(kind === 'audio' ? { micEnabled: false } : {}), [`${kind}Error`]: null });
   }
 
   #stopTrack(kind) {
@@ -81,10 +95,11 @@ export class MediaController {
       if (!track) throw new Error(`No ${kind} track returned.`);
       this.#stopTrack(kind);
       this.tracks[kind] = track;
-      this.#setState({ [kind]: 'on' });
+      if (kind === 'audio') track.enabled = true;
+      this.#setState({ [kind]: 'on', ...(kind === 'audio' ? { micEnabled: true } : {}) });
       return track;
     } catch (error) {
-      if (!this.disposed && generation === this.generations[kind]) this.#setState({ [kind]: 'off', [`${kind}Error`]: error.name ?? 'MediaError' });
+      if (!this.disposed && generation === this.generations[kind]) this.#setState({ [kind]: 'off', ...(kind === 'audio' ? { micEnabled: false } : {}), [`${kind}Error`]: error.name ?? 'MediaError' });
       return null;
     }
   }

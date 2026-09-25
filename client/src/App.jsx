@@ -42,6 +42,8 @@ export default function App() {
   const sessionRef = useRef(null);
   const pendingParticipantEvents = useRef([]);
   const joiningRef = useRef(false);
+  const mediaControllerRef = useRef(null);
+  const mediaRevisionRef = useRef(0);
   const roomId = getRoomIdFromPath(pathname);
   const validRoomId = roomId === null || validateRoomId(roomId).ok;
   const environment = checkBrowserEnvironment(window);
@@ -55,6 +57,7 @@ export default function App() {
     setDraft('');
     setCopyStatus('');
     setMediaState({ audio: 'off', video: 'off' });
+    mediaControllerRef.current = null;
     setStatus('');
     if (clearName) setDisplayName('');
   }
@@ -108,6 +111,7 @@ export default function App() {
 
     const client = new SignalingClient({ url: import.meta.env.VITE_SOCKET_URL });
     const mediaController = new MediaController({ onStateChange: setMediaState });
+    mediaControllerRef.current = mediaController;
     pendingParticipantEvents.current = [];
     joiningRef.current = true;
     const session = new RoomSession({
@@ -134,6 +138,7 @@ export default function App() {
     try {
       const joined = await session.join({ displayName: name.value, roomId: roomId ?? undefined });
       setSnapshot(joined);
+      mediaRevisionRef.current = joined.participants.find(({ participantId }) => participantId === joined.selfParticipantId)?.mediaRevision ?? 0;
       setParticipants(pendingParticipantEvents.current.reduce(applyParticipantEvent, joined.participants));
       pendingParticipantEvents.current = [];
       joiningRef.current = false;
@@ -162,6 +167,24 @@ export default function App() {
       setCopyStatus('Ссылка скопирована.');
     } catch {
       setCopyStatus('Не удалось скопировать автоматически. Скопируйте ссылку вручную.');
+    }
+  }
+
+  async function toggleMicrophone() {
+    const nextMicEnabled = !mediaState.micEnabled;
+    const applied = await mediaControllerRef.current?.setMicEnabled(nextMicEnabled);
+    if (!applied || !sessionRef.current || !snapshot) return;
+    const revision = ++mediaRevisionRef.current;
+    try {
+      const response = await sessionRef.current.signalingClient.request('media:update', {
+        roomEpoch: snapshot.roomEpoch,
+        revision,
+        micEnabled: nextMicEnabled,
+        cameraEnabled: mediaState.video === 'on',
+      });
+      if (!response.ok) throw new Error('Media update was rejected.');
+    } catch {
+      // The next explicit toggle retries publication; no false "on" state is sent after a failed capture.
     }
   }
 
@@ -206,7 +229,8 @@ export default function App() {
           <p className="eyebrow">Вы в комнате</p>
           <h1>Video Chat</h1>
           <p>Участники комнаты</p>
-          <p className="media-status">{mediaState.audio === 'pending' ? 'Подключаем микрофон…' : mediaState.audio === 'on' ? 'Микрофон включён' : 'Микрофон недоступен'} · {mediaState.video === 'pending' ? 'Подключаем камеру…' : mediaState.video === 'on' ? 'Камера включена' : 'Камера недоступна'}</p>
+          <p className="media-status">{mediaState.audio === 'pending' ? 'Подключаем микрофон…' : mediaState.micEnabled ? 'Микрофон включён' : 'Микрофон выключен'} · {mediaState.video === 'pending' ? 'Подключаем камеру…' : mediaState.video === 'on' ? 'Камера включена' : 'Камера недоступна'}</p>
+          <button type="button" onClick={toggleMicrophone} disabled={mediaState.audio === 'pending'}>{mediaState.micEnabled ? 'Выключить микрофон' : 'Включить микрофон'}</button>
           <ParticipantGrid participants={participants} selfParticipantId={snapshot.selfParticipantId} />
           <ChatPanel messages={messages} draft={draft} onDraftChange={setDraft} onSend={sendMessage} onRetry={(message) => sendMessage(message.text, message)} />
           <p className="room-code">{snapshot.roomId}</p>
