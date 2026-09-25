@@ -1,6 +1,15 @@
 import { randomBytes, randomUUID } from 'node:crypto';
+import { ERROR_CODES, validateDisplayName, validateRoomId } from '@video-chat/shared';
 
 const ROOM_ID_BYTES = 16;
+const MAX_PARTICIPANTS = 4;
+
+export class RegistryError extends Error {
+  constructor(code, message) {
+    super(message);
+    this.code = code;
+  }
+}
 
 export function generateRoomId() {
   return randomBytes(ROOM_ID_BYTES).toString('base64url');
@@ -70,5 +79,59 @@ export class RoomRegistry {
 
   getMembership(socketId) {
     return this.socketIndex.get(socketId);
+  }
+
+  createAndJoin({ socketId, displayName }) {
+    const normalizedName = this.#validateJoinInput({ socketId, displayName });
+    const room = this.createRoom();
+    return this.#joinRoom({ room, socketId, displayName: normalizedName });
+  }
+
+  join({ roomId, socketId, displayName }) {
+    const validatedRoomId = validateRoomId(roomId);
+    if (!validatedRoomId.ok) throw new RegistryError(ERROR_CODES.INVALID_ROOM_ID, validatedRoomId.reason);
+    const normalizedName = this.#validateJoinInput({ socketId, displayName });
+    const room = this.getRoom(validatedRoomId.value) ?? this.createRoom(validatedRoomId.value);
+    return this.#joinRoom({ room, socketId, displayName: normalizedName });
+  }
+
+  #validateJoinInput({ socketId, displayName }) {
+    const validatedName = validateDisplayName(displayName);
+    if (!validatedName.ok) throw new RegistryError(ERROR_CODES.INVALID_NAME, validatedName.reason);
+    if (this.socketIndex.has(socketId)) throw new RegistryError(ERROR_CODES.ALREADY_JOINED, 'Socket already belongs to a room.');
+    return validatedName.value;
+  }
+
+  #joinRoom({ room, socketId, displayName }) {
+    if (room.participants.size >= MAX_PARTICIPANTS) throw new RegistryError(ERROR_CODES.ROOM_FULL, 'Room is full.');
+
+    const participant = this.createParticipant({ socketId, displayName });
+    room.participants.set(participant.participantId, participant);
+    this.socketIndex.set(socketId, {
+      roomId: room.roomId,
+      epoch: room.epoch,
+      participantId: participant.participantId,
+    });
+    const entry = this.createChatEntry({
+      room,
+      type: 'join',
+      participantId: participant.participantId,
+      displayName: participant.displayName,
+    });
+    room.history.push(entry);
+
+    return {
+      room,
+      participant,
+      entry,
+      snapshot: {
+        roomId: room.roomId,
+        roomEpoch: room.epoch,
+        selfParticipantId: participant.participantId,
+        snapshotSeq: entry.seq,
+        participants: [...room.participants.values()].map(({ socketId: _socketId, joinedAt: _joinedAt, ...publicParticipant }) => publicParticipant),
+        historyThroughSeq: entry.seq,
+      },
+    };
   }
 }
