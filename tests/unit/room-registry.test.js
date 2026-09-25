@@ -127,4 +127,17 @@ describe('RoomRegistry model', () => {
     expect(registry.updateMedia({ socketId: 'socket-1', roomEpoch: joined.room.epoch, revision: 1, micEnabled: false, cameraEnabled: true })).toMatchObject({ changed: false });
     expect(joined.participant).toMatchObject({ micEnabled: true, cameraEnabled: false, mediaRevision: 1 });
   });
+
+  it('rejects new messages at the history budget without deleting accepted history', () => {
+    const registry = new RoomRegistry({ historyBudgetBytes: 10_000, lifecycleReserveBytes: 100 });
+    const joined = registry.join({ roomId: 'budget_room', socketId: 'socket-1', displayName: 'Анна' });
+    const accepted = registry.appendMessage({ socketId: 'socket-1', roomEpoch: joined.room.epoch, clientMessageId: crypto.randomUUID(), text: 'принятое сообщение' });
+    registry.historyBudgetBytes = registry.historyBytes + registry.lifecycleReserveBytes;
+
+    expect(() => registry.appendMessage({ socketId: 'socket-1', roomEpoch: joined.room.epoch, clientMessageId: crypto.randomUUID(), text: 'сообщение'.repeat(30) })).toThrow(/cannot accept/);
+    expect(joined.room.history).toEqual([joined.entry, accepted.entry]);
+
+    registry.leave({ socketId: 'socket-1', roomEpoch: joined.room.epoch });
+    expect(registry.historyBytes).toBe(0);
+  });
 });

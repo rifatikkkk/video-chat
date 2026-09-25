@@ -21,11 +21,14 @@ export function toPublicParticipant({ socketId: _socketId, joinedAt: _joinedAt, 
 }
 
 export class RoomRegistry {
-  constructor({ roomIdGenerator = generateRoomId, uuidGenerator = randomUUID } = {}) {
+  constructor({ roomIdGenerator = generateRoomId, uuidGenerator = randomUUID, historyBudgetBytes = 1024 ** 3, lifecycleReserveBytes = 1024 ** 2 } = {}) {
     this.rooms = new Map();
     this.socketIndex = new Map();
     this.roomIdGenerator = roomIdGenerator;
     this.uuidGenerator = uuidGenerator;
+    this.historyBudgetBytes = historyBudgetBytes;
+    this.lifecycleReserveBytes = lifecycleReserveBytes;
+    this.historyBytes = 0;
   }
 
   generateUniqueRoomId() {
@@ -45,6 +48,7 @@ export class RoomRegistry {
       nextSeq: 1,
       participants: new Map(),
       history: [],
+      historyBytes: 0,
       messageIndex: new Map(),
     };
     this.rooms.set(roomId, room);
@@ -89,15 +93,26 @@ export class RoomRegistry {
   createAndJoin({ socketId, displayName }) {
     const normalizedName = this.#validateJoinInput({ socketId, displayName });
     const room = this.createRoom();
-    return this.#joinRoom({ room, socketId, displayName: normalizedName });
+    try {
+      return this.#joinRoom({ room, socketId, displayName: normalizedName });
+    } catch (error) {
+      this.#deleteEmptyRoom(room);
+      throw error;
+    }
   }
 
   join({ roomId, socketId, displayName }) {
     const validatedRoomId = validateRoomId(roomId);
     if (!validatedRoomId.ok) throw new RegistryError(ERROR_CODES.INVALID_ROOM_ID, validatedRoomId.reason);
     const normalizedName = this.#validateJoinInput({ socketId, displayName });
-    const room = this.getRoom(validatedRoomId.value) ?? this.createRoom(validatedRoomId.value);
-    return this.#joinRoom({ room, socketId, displayName: normalizedName });
+    const existingRoom = this.getRoom(validatedRoomId.value);
+    const room = existingRoom ?? this.createRoom(validatedRoomId.value);
+    try {
+      return this.#joinRoom({ room, socketId, displayName: normalizedName });
+    } catch (error) {
+      if (!existingRoom) this.#deleteEmptyRoom(room);
+      throw error;
+    }
   }
 
   leave({ socketId, roomEpoch } = {}) {
@@ -121,10 +136,10 @@ export class RoomRegistry {
       participantId: participant.participantId,
       displayName: participant.displayName,
     });
-    room.history.push(entry);
+    this.#appendHistory(room, entry, { allowOverBudget: true });
 
     if (room.participants.size === 0) {
-      this.rooms.delete(room.roomId);
+      this.#deleteEmptyRoom(room);
     }
     return { left: true, room, participant, entry };
   }
@@ -156,7 +171,7 @@ export class RoomRegistry {
       text: validatedText.value,
       clientMessageId,
     });
-    room.history.push(entry);
+    this.#appendHistory(room, entry);
     room.messageIndex.set(key, entry);
     return { room, entry, duplicate: false };
   }
@@ -227,19 +242,19 @@ export class RoomRegistry {
     if (room.participants.size >= MAX_PARTICIPANTS) throw new RegistryError(ERROR_CODES.ROOM_FULL, 'Room is full.');
 
     const participant = this.createParticipant({ socketId, displayName });
-    room.participants.set(participant.participantId, participant);
-    this.socketIndex.set(socketId, {
-      roomId: room.roomId,
-      epoch: room.epoch,
-      participantId: participant.participantId,
-    });
     const entry = this.createChatEntry({
       room,
       type: 'join',
       participantId: participant.participantId,
       displayName: participant.displayName,
     });
-    room.history.push(entry);
+    this.#appendHistory(room, entry);
+    room.participants.set(participant.participantId, participant);
+    this.socketIndex.set(socketId, {
+      roomId: room.roomId,
+      epoch: room.epoch,
+      participantId: participant.participantId,
+    });
 
     return {
       room,
@@ -254,5 +269,22 @@ export class RoomRegistry {
         historyThroughSeq: entry.seq,
       },
     };
+  }
+
+  #appendHistory(room, entry, { allowOverBudget = false } = {}) {
+    const entryBytes = Buffer.byteLength(JSON.stringify(entry));
+    const limit = this.historyBudgetBytes - this.lifecycleReserveBytes;
+    if (!allowOverBudget && this.historyBytes + entryBytes > limit) {
+      throw new RegistryError(ERROR_CODES.SERVER_BUSY, 'Server cannot accept another message.');
+    }
+    room.history.push(entry);
+    room.historyBytes += entryBytes;
+    this.historyBytes += entryBytes;
+  }
+
+  #deleteEmptyRoom(room) {
+    if (room.participants.size !== 0) return;
+    this.rooms.delete(room.roomId);
+    this.historyBytes -= room.historyBytes;
   }
 }
