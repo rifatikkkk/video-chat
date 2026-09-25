@@ -153,4 +153,19 @@ describe('Socket.IO integration harness', () => {
       boris.close();
     }
   });
+
+  it('returns history pages only to the active room member', async () => {
+    const url = await startIsolatedServer();
+    const anna = createClient(url, { transports: ['websocket'], forceNew: true });
+    try {
+      await new Promise((resolve, reject) => { anna.once('server:ready', resolve); anna.once('connect_error', reject); });
+      const created = await anna.emitWithAck('room:create', { v: 1, requestId: crypto.randomUUID(), displayName: 'Анна' });
+      await anna.emitWithAck('chat:send', { v: 1, requestId: crypto.randomUUID(), roomEpoch: created.data.roomEpoch, clientMessageId: crypto.randomUUID(), text: 'Первое' });
+      const page = await anna.emitWithAck('history:get', { v: 1, requestId: crypto.randomUUID(), roomEpoch: created.data.roomEpoch, throughSeq: 2, afterSeq: 0, limit: 50 });
+
+      expect(page).toMatchObject({ ok: true, data: { throughSeq: 2, done: true, entries: [{ type: 'join' }, { type: 'user', text: 'Первое' }] } });
+    } finally {
+      anna.close();
+    }
+  });
 });
