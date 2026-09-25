@@ -109,6 +109,22 @@ export function registerHandlers(socket, registry, io) {
     return { changed: result.changed };
   });
 
+  handle('signal:description', ({ roomEpoch, toParticipantId, description }) => {
+    if (!description || !['offer', 'answer'].includes(description.type) || typeof description.sdp !== 'string' || description.sdp.length > 64 * 1024) {
+      throw new RegistryError(ERROR_CODES.INVALID_REQUEST, 'Invalid SDP description.');
+    }
+    const route = registry.getSignalRoute({ socketId: socket.id, roomEpoch, toParticipantId });
+    io.to(route.target.socketId).emit('signal:description', { v: PROTOCOL_VERSION, roomEpoch, fromParticipantId: route.fromParticipantId, description });
+    return { delivered: true };
+  });
+
+  handle('signal:candidate', ({ roomEpoch, toParticipantId, iceUfrag, candidate }) => {
+    if (typeof iceUfrag !== 'string' || !(candidate === null || typeof candidate === 'object')) throw new RegistryError(ERROR_CODES.INVALID_REQUEST, 'Invalid ICE candidate.');
+    const route = registry.getSignalRoute({ socketId: socket.id, roomEpoch, toParticipantId });
+    io.to(route.target.socketId).emit('signal:candidate', { v: PROTOCOL_VERSION, roomEpoch, fromParticipantId: route.fromParticipantId, iceUfrag, candidate });
+    return { delivered: true };
+  });
+
   socket.on('disconnect', () => {
     const result = registry.leave({ socketId: socket.id });
     if (result.left) {
