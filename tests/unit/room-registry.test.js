@@ -129,9 +129,15 @@ describe('RoomRegistry model', () => {
   });
 
   it('rejects new messages at the history budget without deleting accepted history', () => {
-    const registry = new RoomRegistry({ historyBudgetBytes: 500, lifecycleReserveBytes: 300 });
+    const registry = new RoomRegistry({ historyBudgetBytes: 10_000, lifecycleReserveBytes: 100 });
     const joined = registry.join({ roomId: 'budget_room', socketId: 'socket-1', displayName: 'Анна' });
+    const accepted = registry.appendMessage({ socketId: 'socket-1', roomEpoch: joined.room.epoch, clientMessageId: crypto.randomUUID(), text: 'принятое сообщение' });
+    registry.historyBudgetBytes = registry.historyBytes + registry.lifecycleReserveBytes;
+
     expect(() => registry.appendMessage({ socketId: 'socket-1', roomEpoch: joined.room.epoch, clientMessageId: crypto.randomUUID(), text: 'сообщение'.repeat(30) })).toThrow(/cannot accept/);
-    expect(joined.room.history).toHaveLength(1);
+    expect(joined.room.history).toEqual([joined.entry, accepted.entry]);
+
+    registry.leave({ socketId: 'socket-1', roomEpoch: joined.room.epoch });
+    expect(registry.historyBytes).toBe(0);
   });
 });
