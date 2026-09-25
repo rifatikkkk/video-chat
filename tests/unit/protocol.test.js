@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ERROR_CODES, PROTOCOL_VERSION, createErrorAck, createSuccessAck, validateAck, validateDisplayName, validateRequestEnvelope, validateRoomEvent, validateRoomId, validateSignalDescription } from '../../shared/protocol.js';
+import { ERROR_CODES, MAX_ICE_BYTES, MAX_SDP_BYTES, PROTOCOL_VERSION, createErrorAck, createSuccessAck, validateAck, validateChatMessage, validateDisplayName, validatePayloadSize, validateRequestEnvelope, validateRoomEvent, validateRoomId, validateSignalCandidate, validateSignalDescription } from '../../shared/protocol.js';
 
 describe('protocol bootstrap', () => {
   it('exposes the initial protocol version', () => {
@@ -33,5 +33,19 @@ describe('protocol bootstrap', () => {
     expect(validateRoomId('a'.repeat(64))).toMatchObject({ ok: true });
     expect(validateRoomId('a'.repeat(65))).toMatchObject({ ok: false, code: ERROR_CODES.INVALID_ROOM_ID });
     expect(validateRoomId('room/name')).toMatchObject({ ok: false, code: ERROR_CODES.INVALID_ROOM_ID });
+  });
+
+  it('validates messages by code points while keeping HTML as literal text', () => {
+    expect(validateChatMessage('  <b>привет</b>  ')).toEqual({ ok: true, value: '<b>привет</b>' });
+    expect(validateChatMessage('😀'.repeat(2_000))).toMatchObject({ ok: true });
+    expect(validateChatMessage('😀'.repeat(2_001))).toMatchObject({ ok: false, code: ERROR_CODES.INVALID_MESSAGE });
+    expect(validateChatMessage(' \n ')).toMatchObject({ ok: false, code: ERROR_CODES.INVALID_MESSAGE });
+  });
+
+  it('enforces packet, SDP, and ICE byte limits', () => {
+    expect(validatePayloadSize({ text: 'a'.repeat(128 * 1024) })).toMatchObject({ ok: false });
+    const ids = { roomEpoch: crypto.randomUUID(), fromParticipantId: crypto.randomUUID() };
+    expect(validateSignalDescription({ v: 1, ...ids, description: { type: 'offer', sdp: 'a'.repeat(MAX_SDP_BYTES + 1) } })).toMatchObject({ ok: false });
+    expect(validateSignalCandidate({ v: 1, ...ids, iceUfrag: 'u', candidate: { candidate: 'a'.repeat(MAX_ICE_BYTES) } })).toMatchObject({ ok: false });
   });
 });
