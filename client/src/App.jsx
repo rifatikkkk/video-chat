@@ -21,6 +21,10 @@ export function joinErrorMessage(code) {
   return 'Не удалось войти в комнату. Попробуйте ещё раз.';
 }
 
+export function shouldResetForPageShow(event) {
+  return Boolean(event?.persisted);
+}
+
 export default function App() {
   const [pathname, setPathname] = useState(() => window.location.pathname);
   const [displayName, setDisplayName] = useState('');
@@ -37,21 +41,44 @@ export default function App() {
   const roomId = getRoomIdFromPath(pathname);
   const validRoomId = roomId === null || validateRoomId(roomId).ok;
 
+  function resetSessionView({ clearName = true } = {}) {
+    joiningRef.current = false;
+    pendingParticipantEvents.current = [];
+    setSnapshot(null);
+    setParticipants([]);
+    setMessages([]);
+    setDraft('');
+    setCopyStatus('');
+    setStatus('');
+    if (clearName) setDisplayName('');
+  }
+
   useEffect(() => {
     const onPopState = () => {
       sessionRef.current?.dispose();
       sessionRef.current = null;
-      setSnapshot(null);
-      setParticipants([]);
-      setMessages([]);
-      setDraft('');
+      resetSessionView();
       setError('');
-      setStatus('');
       setPathname(window.location.pathname);
     };
+    const onPageHide = () => {
+      void sessionRef.current?.dispose();
+      sessionRef.current = null;
+      resetSessionView();
+    };
+    const onPageShow = (event) => {
+      if (!shouldResetForPageShow(event)) return;
+      sessionRef.current = null;
+      resetSessionView();
+      setError('Сессия завершена. Введите имя, чтобы войти снова.');
+    };
     window.addEventListener('popstate', onPopState);
+    window.addEventListener('pagehide', onPageHide);
+    window.addEventListener('pageshow', onPageShow);
     return () => {
       window.removeEventListener('popstate', onPopState);
+      window.removeEventListener('pagehide', onPageHide);
+      window.removeEventListener('pageshow', onPageShow);
       sessionRef.current?.dispose();
     };
   }, []);
@@ -83,7 +110,15 @@ export default function App() {
       },
     });
     sessionRef.current = session;
-    const unsubscribe = session.onStateChange((state) => setStatus(state));
+    const unsubscribe = session.onStateChange((state) => {
+      setStatus(state);
+      if (state === 'ended' && sessionRef.current === session) {
+        sessionRef.current = null;
+        resetSessionView();
+        setError('Соединение завершено. Введите имя, чтобы войти снова.');
+        unsubscribe();
+      }
+    });
     try {
       const joined = await session.join({ displayName: name.value, roomId: roomId ?? undefined });
       setSnapshot(joined);
@@ -98,7 +133,6 @@ export default function App() {
       joiningRef.current = false;
       sessionRef.current = null;
       setError(joinErrorMessage(joinError.code));
-    } finally {
       unsubscribe();
     }
   }
@@ -106,11 +140,7 @@ export default function App() {
   async function leave() {
     await sessionRef.current?.leave();
     sessionRef.current = null;
-    setSnapshot(null);
-    setParticipants([]);
-    setMessages([]);
-    setDraft('');
-    setStatus('');
+    resetSessionView();
   }
 
   async function copyRoomUrl() {

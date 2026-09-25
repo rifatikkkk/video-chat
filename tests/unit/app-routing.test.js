@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getRoomIdFromPath, joinErrorMessage } from '../../client/src/App.jsx';
+import { getRoomIdFromPath, joinErrorMessage, shouldResetForPageShow } from '../../client/src/App.jsx';
 
 describe('room entry routing', () => {
   it('recognizes only a single room ID path segment', () => {
@@ -11,5 +11,10 @@ describe('room entry routing', () => {
   it('keeps a full room distinguishable and retryable', () => {
     expect(joinErrorMessage('ROOM_FULL')).toMatch(/заполнена/i);
     expect(joinErrorMessage('INVALID_ROOM_ID')).toMatch(/Некорректная/i);
+  });
+
+  it('requires a new form entry after restoring a page from bfcache', () => {
+    expect(shouldResetForPageShow({ persisted: true })).toBe(true);
+    expect(shouldResetForPageShow({ persisted: false })).toBe(false);
   });
 });
