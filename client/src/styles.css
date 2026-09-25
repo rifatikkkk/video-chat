@@ -32,6 +32,7 @@ a { display: inline-block; margin-top: 1.2rem; color: #b8d8ff; }
 .chat-message small { color: #ffcf8c; }
 .chat-message--error small { color: #ffb4ab; }
 .chat-message button { margin-top: .5rem; padding: .4rem .6rem; }
+.chat-older { padding: .45rem .6rem; color: #dceaff; background: #39445d; }
 .chat-form { margin-top: 1rem; }
 .chat-form textarea { resize: vertical; border: 1px solid #68708a; border-radius: .5rem; padding: .7rem .8rem; color: inherit; background: #151821; }
 @media (min-width: 1024px) { .card { width: min(100%, 42rem); } .participant-grid--3, .participant-grid--4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
