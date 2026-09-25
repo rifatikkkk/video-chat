@@ -21,7 +21,7 @@ export function createAppServer({ registry = new RoomRegistry() } = {}) {
 
   io.on('connection', (socket) => {
     socket.emit('server:ready', { v: PROTOCOL_VERSION });
-    registerHandlers(socket, registry);
+    registerHandlers(socket, registry, io);
   });
 
   return { app, io, registry, server };

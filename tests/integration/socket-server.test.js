@@ -83,4 +83,40 @@ describe('Socket.IO integration harness', () => {
       client.close();
     }
   });
+
+  it('broadcasts ordered room events only to members of the changed room', async () => {
+    const url = await startIsolatedServer();
+    const anna = createClient(url, { transports: ['websocket'], forceNew: true });
+    const boris = createClient(url, { transports: ['websocket'], forceNew: true });
+    const outsider = createClient(url, { transports: ['websocket'], forceNew: true });
+    const waitReady = (client) => new Promise((resolve, reject) => {
+      client.once('server:ready', resolve);
+      client.once('connect_error', reject);
+    });
+
+    try {
+      await Promise.all([waitReady(anna), waitReady(boris), waitReady(outsider)]);
+      const annaEvents = [];
+      const borisEvents = [];
+      const outsiderEvents = [];
+      anna.on('room:event', (event) => annaEvents.push(event));
+      boris.on('room:event', (event) => borisEvents.push(event));
+      outsider.on('room:event', (event) => outsiderEvents.push(event));
+
+      const created = await anna.emitWithAck('room:create', { v: 1, requestId: crypto.randomUUID(), displayName: 'Анна' });
+      await boris.emitWithAck('room:join', { v: 1, requestId: crypto.randomUUID(), roomId: created.data.roomId, displayName: 'Борис' });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      await boris.emitWithAck('room:leave', { v: 1, requestId: crypto.randomUUID(), roomEpoch: created.data.roomEpoch });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+
+      expect(annaEvents.map((event) => event.kind)).toEqual(['participant-joined', 'participant-joined', 'participant-left']);
+      expect(borisEvents.map((event) => event.kind)).toEqual(['participant-joined']);
+      expect(annaEvents[2]).toMatchObject({ seq: 3, payload: { participantId: expect.any(String), entry: { type: 'leave' } } });
+      expect(outsiderEvents).toEqual([]);
+    } finally {
+      anna.close();
+      boris.close();
+      outsider.close();
+    }
+  });
 });

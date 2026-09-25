@@ -6,6 +6,7 @@ import {
   validateRequestEnvelope,
 } from '@video-chat/shared';
 import { RegistryError } from '../rooms/RoomRegistry.js';
+import { toPublicParticipant } from '../rooms/RoomRegistry.js';
 
 const ERROR_MESSAGES = {
   [ERROR_CODES.PROTOCOL_MISMATCH]: 'Обновите страницу: версии клиента и сервера не совпадают.',
@@ -16,7 +17,14 @@ function requestError(requestId, code, message) {
   return createErrorAck(requestId, code, message ?? ERROR_MESSAGES[code] ?? 'Операция не выполнена.');
 }
 
-export function registerHandlers(socket, registry) {
+function emitRoomEvent(io, room, kind, payload) {
+  const event = { v: PROTOCOL_VERSION, roomEpoch: room.epoch, seq: payload.entry.seq, kind, payload };
+  for (const participant of room.participants.values()) {
+    io.to(participant.socketId).emit('room:event', event);
+  }
+}
+
+export function registerHandlers(socket, registry, io) {
   const requestCache = new Map();
 
   function handle(event, action) {
@@ -48,21 +56,41 @@ export function registerHandlers(socket, registry) {
 
   handle('room:create', ({ displayName }) => {
     const result = registry.createAndJoin({ socketId: socket.id, displayName });
+    emitRoomEvent(io, result.room, 'participant-joined', {
+      participant: toPublicParticipant(result.participant),
+      entry: result.entry,
+    });
     return result.snapshot;
   });
 
   handle('room:join', ({ roomId, displayName }) => {
     const result = registry.join({ roomId, socketId: socket.id, displayName });
+    emitRoomEvent(io, result.room, 'participant-joined', {
+      participant: toPublicParticipant(result.participant),
+      entry: result.entry,
+    });
     return result.snapshot;
   });
 
   handle('room:leave', ({ roomEpoch }) => {
     const result = registry.leave({ socketId: socket.id, roomEpoch });
+    if (result.left) {
+      emitRoomEvent(io, result.room, 'participant-left', {
+        participantId: result.participant.participantId,
+        entry: result.entry,
+      });
+    }
     return { left: result.left };
   });
 
   socket.on('disconnect', () => {
-    registry.leave({ socketId: socket.id });
+    const result = registry.leave({ socketId: socket.id });
+    if (result.left) {
+      emitRoomEvent(io, result.room, 'participant-left', {
+        participantId: result.participant.participantId,
+        entry: result.entry,
+      });
+    }
     requestCache.clear();
   });
 }
