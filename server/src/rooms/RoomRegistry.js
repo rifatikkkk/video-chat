@@ -1,8 +1,9 @@
 import { randomBytes, randomUUID } from 'node:crypto';
-import { ERROR_CODES, validateDisplayName, validateRoomId } from '@video-chat/shared';
+import { ERROR_CODES, validateChatMessage, validateDisplayName, validateRoomId } from '@video-chat/shared';
 
 const ROOM_ID_BYTES = 16;
 const MAX_PARTICIPANTS = 4;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export class RegistryError extends Error {
   constructor(code, message) {
@@ -126,6 +127,38 @@ export class RoomRegistry {
       this.rooms.delete(room.roomId);
     }
     return { left: true, room, participant, entry };
+  }
+
+  appendMessage({ socketId, roomEpoch, clientMessageId, text }) {
+    const membership = this.socketIndex.get(socketId);
+    if (!membership) throw new RegistryError(ERROR_CODES.NOT_JOINED, 'Socket is not in a room.');
+    const room = this.rooms.get(membership.roomId);
+    if (!room || room.epoch !== roomEpoch) throw new RegistryError(ERROR_CODES.STALE_ROOM, 'Room epoch does not match the active session.');
+    if (typeof clientMessageId !== 'string' || !UUID.test(clientMessageId)) {
+      throw new RegistryError(ERROR_CODES.INVALID_REQUEST, 'clientMessageId must be a UUID.');
+    }
+    const validatedText = validateChatMessage(text);
+    if (!validatedText.ok) throw new RegistryError(ERROR_CODES.INVALID_MESSAGE, validatedText.reason);
+
+    const key = `${membership.participantId}:${clientMessageId}`;
+    const existing = room.messageIndex.get(key);
+    if (existing) {
+      if (existing.text !== validatedText.value) throw new RegistryError(ERROR_CODES.MESSAGE_ID_CONFLICT, 'Message ID was already used with different text.');
+      return { room, entry: existing, duplicate: true };
+    }
+
+    const participant = room.participants.get(membership.participantId);
+    const entry = this.createChatEntry({
+      room,
+      type: 'user',
+      participantId: participant.participantId,
+      displayName: participant.displayName,
+      text: validatedText.value,
+      clientMessageId,
+    });
+    room.history.push(entry);
+    room.messageIndex.set(key, entry);
+    return { room, entry, duplicate: false };
   }
 
   #validateJoinInput({ socketId, displayName }) {

@@ -119,4 +119,38 @@ describe('Socket.IO integration harness', () => {
       outsider.close();
     }
   });
+
+  it('accepts and broadcasts one server-authored chat entry despite an ack retry', async () => {
+    const url = await startIsolatedServer();
+    const anna = createClient(url, { transports: ['websocket'], forceNew: true });
+    const boris = createClient(url, { transports: ['websocket'], forceNew: true });
+    const waitReady = (client) => new Promise((resolve, reject) => {
+      client.once('server:ready', resolve);
+      client.once('connect_error', reject);
+    });
+
+    try {
+      await Promise.all([waitReady(anna), waitReady(boris)]);
+      const created = await anna.emitWithAck('room:create', { v: 1, requestId: crypto.randomUUID(), displayName: 'Анна' });
+      await boris.emitWithAck('room:join', { v: 1, requestId: crypto.randomUUID(), roomId: created.data.roomId, displayName: 'Борис' });
+      const messages = [];
+      boris.on('room:event', (event) => {
+        if (event.kind === 'chat-message') messages.push(event.payload.entry);
+      });
+      const requestId = crypto.randomUUID();
+      const clientMessageId = crypto.randomUUID();
+      const first = await anna.emitWithAck('chat:send', { v: 1, requestId, roomEpoch: created.data.roomEpoch, clientMessageId, text: '  Привет  ' });
+      const replay = await anna.emitWithAck('chat:send', { v: 1, requestId, roomEpoch: created.data.roomEpoch, clientMessageId, text: '  Привет  ' });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      const conflict = await anna.emitWithAck('chat:send', { v: 1, requestId: crypto.randomUUID(), roomEpoch: created.data.roomEpoch, clientMessageId, text: 'Пока' });
+
+      expect(first).toMatchObject({ ok: true, data: { duplicate: false, entry: { displayName: 'Анна', text: 'Привет' } } });
+      expect(replay).toEqual(first);
+      expect(messages).toHaveLength(1);
+      expect(conflict).toMatchObject({ ok: false, error: { code: 'MESSAGE_ID_CONFLICT' } });
+    } finally {
+      anna.close();
+      boris.close();
+    }
+  });
 });
