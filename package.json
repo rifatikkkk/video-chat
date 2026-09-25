@@ -1,0 +1,26 @@
+{
+  "name": "video-chat-room",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Video Chat Room — React, Node.js, Socket.IO and WebRTC",
+  "engines": {
+    "node": ">=22.0.0",
+    "npm": ">=10.0.0"
+  },
+  "packageManager": "npm@11.16.0",
+  "workspaces": [
+    "client",
+    "server",
+    "shared"
+  ],
+  "scripts": {
+    "dev": "concurrently --kill-others-on-fail -n server,client -c blue,green \"npm run dev --workspace @video-chat/server\" \"npm run dev --workspace @video-chat/client\"",
+    "dev:server": "npm run dev --workspace @video-chat/server",
+    "dev:client": "npm run dev --workspace @video-chat/client",
+    "build": "npm run build --workspace @video-chat/client",
+    "start": "npm run start --workspace @video-chat/server"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}
