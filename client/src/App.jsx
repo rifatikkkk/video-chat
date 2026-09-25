@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
-import { validateDisplayName, validateRoomId } from '@video-chat/shared';
+import { validateChatMessage, validateDisplayName, validateRoomId } from '@video-chat/shared';
 import { RoomSession } from './session/RoomSession.js';
 import { SignalingClient } from './socket/SignalingClient.js';
 import { copyInvitation } from './clipboard/invitation.js';
 import { ParticipantGrid } from './components/ParticipantGrid.jsx';
 import { applyParticipantEvent } from './participants/participantState.js';
+import { ChatPanel } from './components/ChatPanel.jsx';
+import { addPendingMessage, chatErrorMessage, markMessage, mergeChatEntry } from './chat/chatState.js';
 
 export function getRoomIdFromPath(pathname) {
   const match = /^\/room\/([^/]+)$/.exec(pathname);
@@ -26,6 +28,8 @@ export default function App() {
   const [snapshot, setSnapshot] = useState(null);
   const [copyStatus, setCopyStatus] = useState('');
   const [participants, setParticipants] = useState([]);
+  const [messages, setMessages] = useState([]);
+  const [draft, setDraft] = useState('');
   const sessionRef = useRef(null);
   const pendingParticipantEvents = useRef([]);
   const joiningRef = useRef(false);
@@ -38,6 +42,8 @@ export default function App() {
       sessionRef.current = null;
       setSnapshot(null);
       setParticipants([]);
+      setMessages([]);
+      setDraft('');
       setError('');
       setStatus('');
       setPathname(window.location.pathname);
@@ -70,6 +76,7 @@ export default function App() {
       onRoomEvent: (roomEvent) => {
         if (joiningRef.current) pendingParticipantEvents.current.push(roomEvent);
         setParticipants((current) => applyParticipantEvent(current, roomEvent));
+        if (roomEvent.kind === 'chat-message') setMessages((current) => mergeChatEntry(current, roomEvent.payload.entry));
       },
     });
     sessionRef.current = session;
@@ -97,6 +104,8 @@ export default function App() {
     sessionRef.current = null;
     setSnapshot(null);
     setParticipants([]);
+    setMessages([]);
+    setDraft('');
     setStatus('');
   }
 
@@ -109,6 +118,26 @@ export default function App() {
     }
   }
 
+  async function sendMessage(text, retryMessage) {
+    const validated = validateChatMessage(text);
+    if (!validated.ok) return false;
+    const clientMessageId = retryMessage?.clientMessageId ?? crypto.randomUUID();
+    if (!retryMessage) setMessages((current) => addPendingMessage(current, { clientMessageId, text: validated.value, displayName }));
+    else setMessages((current) => markMessage(current, clientMessageId, 'pending'));
+    try {
+      const response = await sessionRef.current.signalingClient.request('chat:send', { roomEpoch: snapshot.roomEpoch, clientMessageId, text: validated.value });
+      if (response.ok) {
+        setMessages((current) => mergeChatEntry(current, response.data.entry));
+        return true;
+      }
+      setMessages((current) => markMessage(current, clientMessageId, 'error', chatErrorMessage(response.error.code, response.error.details?.retryAfterMs)));
+    } catch (error) {
+      const status = error.code === 'ACK_TIMEOUT' ? 'unconfirmed' : 'error';
+      setMessages((current) => markMessage(current, clientMessageId, status, status === 'error' ? 'Не удалось отправить сообщение.' : ''));
+    }
+    return false;
+  }
+
   if (snapshot) {
     return (
       <main className="app-shell">
@@ -117,6 +146,7 @@ export default function App() {
           <h1>Video Chat</h1>
           <p>Участники комнаты</p>
           <ParticipantGrid participants={participants} selfParticipantId={snapshot.selfParticipantId} />
+          <ChatPanel messages={messages} draft={draft} onDraftChange={setDraft} onSend={sendMessage} onRetry={(message) => sendMessage(message.text, message)} />
           <p className="room-code">{snapshot.roomId}</p>
           <button type="button" onClick={copyRoomUrl}>Скопировать приглашение</button>
           {copyStatus && <p className={copyStatus === 'Ссылка скопирована.' ? 'success' : 'error'} role="status">{copyStatus}</p>}

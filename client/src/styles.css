@@ -22,4 +22,15 @@ a { display: inline-block; margin-top: 1.2rem; color: #b8d8ff; }
 .participant-avatar { display: grid; width: 3rem; height: 3rem; place-items: center; border-radius: 50%; background: #39445d; font-size: 1.6rem; }
 .participant-meta { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
 .participant-tile p { margin: 0; font-size: .85rem; }
+.chat-panel { margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid #3a4051; }
+.chat-panel h2 { margin: 0 0 .75rem; }
+.chat-messages { display: grid; gap: .6rem; max-height: 18rem; overflow: auto; }
+.chat-message { padding: .65rem .75rem; border-radius: .5rem; background: #171c27; }
+.chat-message header { display: flex; justify-content: space-between; gap: .5rem; }
+.chat-message p { margin: .35rem 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.chat-message small { color: #ffcf8c; }
+.chat-message--error small { color: #ffb4ab; }
+.chat-message button { margin-top: .5rem; padding: .4rem .6rem; }
+.chat-form { margin-top: 1rem; }
+.chat-form textarea { resize: vertical; border: 1px solid #68708a; border-radius: .5rem; padding: .7rem .8rem; color: inherit; background: #151821; }
 @media (min-width: 1024px) { .card { width: min(100%, 42rem); } .participant-grid--3, .participant-grid--4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
