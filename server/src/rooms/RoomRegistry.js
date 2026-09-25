@@ -161,6 +161,33 @@ export class RoomRegistry {
     return { room, entry, duplicate: false };
   }
 
+  getHistory({ socketId, roomEpoch, throughSeq, afterSeq = 0, limit }) {
+    const membership = this.socketIndex.get(socketId);
+    if (!membership) throw new RegistryError(ERROR_CODES.NOT_JOINED, 'Socket is not in a room.');
+    const room = this.rooms.get(membership.roomId);
+    if (!room || room.epoch !== roomEpoch) throw new RegistryError(ERROR_CODES.STALE_ROOM, 'Room epoch does not match the active session.');
+    if (!Number.isInteger(throughSeq) || throughSeq < 0 || !Number.isInteger(afterSeq) || afterSeq < 0 || !Number.isInteger(limit) || limit < 1 || limit > 50) {
+      throw new RegistryError(ERROR_CODES.INVALID_REQUEST, 'History cursor and limit are invalid.');
+    }
+
+    let low = 0;
+    let high = room.history.length;
+    while (low < high) {
+      const middle = Math.floor((low + high) / 2);
+      if (room.history[middle].seq <= afterSeq) low = middle + 1;
+      else high = middle;
+    }
+    const entries = [];
+    for (let index = low; index < room.history.length && entries.length < limit; index += 1) {
+      const entry = room.history[index];
+      if (entry.seq > throughSeq) break;
+      entries.push(entry);
+    }
+    const lastSeq = entries.at(-1)?.seq ?? afterSeq;
+    const done = low >= room.history.length || room.history[low]?.seq > throughSeq || entries.length < limit;
+    return { entries, nextAfterSeq: done ? null : lastSeq, done, throughSeq };
+  }
+
   #validateJoinInput({ socketId, displayName }) {
     const validatedName = validateDisplayName(displayName);
     if (!validatedName.ok) throw new RegistryError(ERROR_CODES.INVALID_NAME, validatedName.reason);

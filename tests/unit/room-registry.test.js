@@ -105,4 +105,18 @@ describe('RoomRegistry model', () => {
     expect(joined.room.history.filter((entry) => entry.type === 'user')).toHaveLength(1);
     expect(() => registry.appendMessage({ socketId: 'socket-1', roomEpoch: joined.room.epoch, clientMessageId, text: 'Другой текст' })).toThrow(/different text/);
   });
+
+  it('pages only the history fixed by throughSeq across sequence gaps', () => {
+    const registry = new RoomRegistry();
+    const joined = registry.join({ roomId: 'history_room', socketId: 'socket-1', displayName: 'Анна' });
+    const first = registry.appendMessage({ socketId: 'socket-1', roomEpoch: joined.room.epoch, clientMessageId: crypto.randomUUID(), text: 'Первое' });
+    joined.room.nextSeq += 2;
+    const second = registry.appendMessage({ socketId: 'socket-1', roomEpoch: joined.room.epoch, clientMessageId: crypto.randomUUID(), text: 'Второе' });
+    const page = registry.getHistory({ socketId: 'socket-1', roomEpoch: joined.room.epoch, throughSeq: second.entry.seq, afterSeq: 0, limit: 2 });
+    const finalPage = registry.getHistory({ socketId: 'socket-1', roomEpoch: joined.room.epoch, throughSeq: first.entry.seq, afterSeq: first.entry.seq, limit: 50 });
+
+    expect(page.entries.map((entry) => entry.seq)).toEqual([1, first.entry.seq]);
+    expect(page).toMatchObject({ done: false, nextAfterSeq: first.entry.seq });
+    expect(finalPage).toMatchObject({ entries: [], done: true, nextAfterSeq: null });
+  });
 });

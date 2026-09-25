@@ -91,6 +91,10 @@ export function registerHandlers(socket, registry, io) {
     return { entry: result.entry, duplicate: result.duplicate };
   });
 
+  handle('history:get', ({ roomEpoch, throughSeq, afterSeq, limit }) => (
+    registry.getHistory({ socketId: socket.id, roomEpoch, throughSeq, afterSeq, limit })
+  ));
+
   socket.on('disconnect', () => {
     const result = registry.leave({ socketId: socket.id });
     if (result.left) {
