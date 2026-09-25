@@ -27,6 +27,7 @@ function createPeerConnection(config) {
     transceivers: [],
     localDescription: null,
     remoteDescription: null,
+    signalingState: 'stable',
     onicecandidate: null,
     close: vi.fn(),
     addTransceiver: vi.fn(function addTransceiver(kind, options) {
@@ -35,10 +36,17 @@ function createPeerConnection(config) {
     createOffer: vi.fn(async () => ({ type: 'offer', sdp: sdpWithUfrag('offer-ufrag') })),
     createAnswer: vi.fn(async () => ({ type: 'answer', sdp: sdpWithUfrag('answer-ufrag') })),
     setLocalDescription: vi.fn(async function setLocalDescription(description) {
+      if (description.type === 'rollback') {
+        this.signalingState = 'stable';
+        this.localDescription = null;
+        return;
+      }
       this.localDescription = description;
+      this.signalingState = description.type === 'offer' ? 'have-local-offer' : 'stable';
     }),
     setRemoteDescription: vi.fn(async function setRemoteDescription(description) {
       this.remoteDescription = description;
+      this.signalingState = description.type === 'offer' ? 'have-remote-offer' : 'stable';
     }),
     addIceCandidate: vi.fn(async function addIceCandidate(candidate) {
       this.appliedCandidates ??= [];
@@ -245,5 +253,56 @@ describe('PeerManager', () => {
   it('parses ICE ufrag from SDP descriptions', () => {
     expect(iceUfragFromDescription({ sdp: 'v=0\r\na=ice-ufrag:abc123\r\n' })).toBe('abc123');
     expect(iceUfragFromDescription({ sdp: 'v=0\r\n' })).toBeNull();
+  });
+
+  it('rolls back a polite peer on offer collision and sends an answer', async () => {
+    const sendDescription = vi.fn(async () => ({ ok: true }));
+    const manager = new PeerManager({ peerConnectionFactory: createPeerConnectionFactory(), sendDescription });
+
+    manager.applySnapshot(snapshot([selfParticipantId, lowerRemoteId]));
+    const peer = manager.getPeer(lowerRemoteId);
+    peer.connection.signalingState = 'have-local-offer';
+    manager.handleSignal({ roomEpoch, fromParticipantId: lowerRemoteId, description: { type: 'offer', sdp: sdpWithUfrag('remote-collision') } });
+    await peer.operationQueue;
+
+    expect(peer.connection.setLocalDescription).toHaveBeenCalledWith({ type: 'rollback' });
+    expect(peer.connection.setRemoteDescription).toHaveBeenCalledWith({ type: 'offer', sdp: sdpWithUfrag('remote-collision') });
+    expect(sendDescription).toHaveBeenCalledWith({ roomEpoch, toParticipantId: lowerRemoteId, description: { type: 'answer', sdp: sdpWithUfrag('answer-ufrag') } });
+    expect(peer.connection.signalingState).toBe('stable');
+  });
+
+  it('ignores an impolite collided offer and drops its related ICE', async () => {
+    const manager = new PeerManager({ peerConnectionFactory: createPeerConnectionFactory() });
+
+    manager.applySnapshot(snapshot([selfParticipantId, firstRemoteId]));
+    const peer = manager.getPeer(firstRemoteId);
+    await peer.operationQueue;
+    peer.connection.signalingState = 'have-local-offer';
+    manager.handleSignal({ roomEpoch, fromParticipantId: firstRemoteId, description: { type: 'offer', sdp: sdpWithUfrag('ignored-offer') } });
+    manager.handleSignal({ roomEpoch, fromParticipantId: firstRemoteId, iceUfrag: 'ignored-offer', candidate: { candidate: 'candidate:ignored' } });
+    await peer.operationQueue;
+
+    expect(peer.connection.setRemoteDescription).not.toHaveBeenCalledWith({ type: 'offer', sdp: sdpWithUfrag('ignored-offer') });
+    expect(peer.connection.addIceCandidate).not.toHaveBeenCalledWith({ candidate: 'candidate:ignored' });
+    expect(peer.queuedIceCandidates).toEqual([]);
+  });
+
+  it('keeps other peers alive when one SDP operation fails', async () => {
+    const factory = createPeerConnectionFactory();
+    const manager = new PeerManager({ peerConnectionFactory: factory });
+
+    manager.applySnapshot(snapshot([selfParticipantId, lowerRemoteId, firstRemoteId]));
+    await Promise.all(manager.getPeers().map((peer) => peer.operationQueue));
+    const failingPeer = manager.getPeer(lowerRemoteId);
+    const healthyPeer = manager.getPeer(firstRemoteId);
+    failingPeer.connection.setRemoteDescription.mockRejectedValueOnce(new Error('bad sdp'));
+
+    manager.handleSignal({ roomEpoch, fromParticipantId: lowerRemoteId, description: { type: 'offer', sdp: sdpWithUfrag('bad-offer') } });
+    manager.handleSignal({ roomEpoch, fromParticipantId: firstRemoteId, description: { type: 'answer', sdp: sdpWithUfrag('healthy-answer') } });
+    await Promise.all(manager.getPeers().map((peer) => peer.operationQueue));
+
+    expect(healthyPeer.connection.setRemoteDescription).toHaveBeenCalledWith({ type: 'answer', sdp: sdpWithUfrag('healthy-answer') });
+    expect(manager.getPeer(lowerRemoteId)).toBe(failingPeer);
+    expect(manager.getPeer(firstRemoteId)).toBe(healthyPeer);
   });
 });
