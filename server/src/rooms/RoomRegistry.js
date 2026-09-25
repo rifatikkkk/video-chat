@@ -21,11 +21,14 @@ export function toPublicParticipant({ socketId: _socketId, joinedAt: _joinedAt, 
 }
 
 export class RoomRegistry {
-  constructor({ roomIdGenerator = generateRoomId, uuidGenerator = randomUUID } = {}) {
+  constructor({ roomIdGenerator = generateRoomId, uuidGenerator = randomUUID, historyBudgetBytes = 1024 ** 3, lifecycleReserveBytes = 1024 ** 2 } = {}) {
     this.rooms = new Map();
     this.socketIndex = new Map();
     this.roomIdGenerator = roomIdGenerator;
     this.uuidGenerator = uuidGenerator;
+    this.historyBudgetBytes = historyBudgetBytes;
+    this.lifecycleReserveBytes = lifecycleReserveBytes;
+    this.historyBytes = 0;
   }
 
   generateUniqueRoomId() {
@@ -156,8 +159,11 @@ export class RoomRegistry {
       text: validatedText.value,
       clientMessageId,
     });
+    const entryBytes = Buffer.byteLength(JSON.stringify(entry));
+    if (this.historyBytes + entryBytes > this.historyBudgetBytes - this.lifecycleReserveBytes) throw new RegistryError(ERROR_CODES.SERVER_BUSY, 'Server cannot accept another message.');
     room.history.push(entry);
     room.messageIndex.set(key, entry);
+    this.historyBytes += entryBytes;
     return { room, entry, duplicate: false };
   }
 
