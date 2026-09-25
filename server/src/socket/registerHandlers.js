@@ -83,6 +83,14 @@ export function registerHandlers(socket, registry, io) {
     return { left: result.left };
   });
 
+  handle('chat:send', ({ roomEpoch, clientMessageId, text }) => {
+    const result = registry.appendMessage({ socketId: socket.id, roomEpoch, clientMessageId, text });
+    if (!result.duplicate) {
+      emitRoomEvent(io, result.room, 'chat-message', { entry: result.entry });
+    }
+    return { entry: result.entry, duplicate: result.duplicate };
+  });
+
   socket.on('disconnect', () => {
     const result = registry.leave({ socketId: socket.id });
     if (result.left) {

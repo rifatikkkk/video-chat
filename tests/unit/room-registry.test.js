@@ -91,4 +91,18 @@ describe('RoomRegistry model', () => {
     expect(() => registry.leave({ socketId: 'socket-1', roomEpoch: crypto.randomUUID() })).toThrow(/epoch/);
     expect(registry.getMembership('socket-1')).toMatchObject({ epoch: joined.room.epoch });
   });
+
+  it('deduplicates accepted chat messages by participant and client message ID', () => {
+    const registry = new RoomRegistry();
+    const joined = registry.join({ roomId: 'chat_room', socketId: 'socket-1', displayName: 'Анна' });
+    const clientMessageId = crypto.randomUUID();
+
+    const first = registry.appendMessage({ socketId: 'socket-1', roomEpoch: joined.room.epoch, clientMessageId, text: '  <b>Привет</b>  ' });
+    const replay = registry.appendMessage({ socketId: 'socket-1', roomEpoch: joined.room.epoch, clientMessageId, text: '<b>Привет</b>' });
+
+    expect(first).toMatchObject({ duplicate: false, entry: { type: 'user', displayName: 'Анна', text: '<b>Привет</b>' } });
+    expect(replay).toMatchObject({ duplicate: true, entry: first.entry });
+    expect(joined.room.history.filter((entry) => entry.type === 'user')).toHaveLength(1);
+    expect(() => registry.appendMessage({ socketId: 'socket-1', roomEpoch: joined.room.epoch, clientMessageId, text: 'Другой текст' })).toThrow(/different text/);
+  });
 });
