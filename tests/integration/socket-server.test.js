@@ -39,4 +39,48 @@ describe('Socket.IO integration harness', () => {
       client.close();
     }
   });
+
+  it('joins once per socket, replays an ack by requestId, and cleans up on disconnect', async () => {
+    const url = await startIsolatedServer();
+    const client = createClient(url, { autoConnect: false, reconnection: false, transports: ['websocket'] });
+    const requestId = crypto.randomUUID();
+
+    try {
+      const ready = new Promise((resolve, reject) => {
+        client.once('server:ready', resolve);
+        client.once('connect_error', reject);
+      });
+      client.connect();
+      await ready;
+
+      const first = await client.emitWithAck('room:create', { v: 1, requestId, displayName: 'Анна' });
+      const replay = await client.emitWithAck('room:create', { v: 1, requestId, displayName: 'Другое имя' });
+      const duplicate = await client.emitWithAck('room:create', { v: 1, requestId: crypto.randomUUID(), displayName: 'Анна' });
+
+      expect(first).toMatchObject({ ok: true, requestId, data: { participants: [{ displayName: 'Анна' }] } });
+      expect(replay).toEqual(first);
+      expect(duplicate).toMatchObject({ ok: false, error: { code: 'ALREADY_JOINED' } });
+      const { roomId } = first.data;
+      client.close();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(runningServers[0].registry.getRoom(roomId)).toBeUndefined();
+    } finally {
+      client.close();
+    }
+  });
+
+  it('rejects an incompatible protocol version before joining', async () => {
+    const url = await startIsolatedServer();
+    const client = createClient(url, { transports: ['websocket'], forceNew: true });
+    try {
+      await new Promise((resolve, reject) => {
+        client.once('server:ready', resolve);
+        client.once('connect_error', reject);
+      });
+      const response = await client.emitWithAck('room:create', { v: 2, requestId: crypto.randomUUID(), displayName: 'Анна' });
+      expect(response).toMatchObject({ ok: false, error: { code: 'PROTOCOL_MISMATCH' } });
+    } finally {
+      client.close();
+    }
+  });
 });

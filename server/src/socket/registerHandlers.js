@@ -1,0 +1,68 @@
+import {
+  ERROR_CODES,
+  PROTOCOL_VERSION,
+  createErrorAck,
+  createSuccessAck,
+  validateRequestEnvelope,
+} from '@video-chat/shared';
+import { RegistryError } from '../rooms/RoomRegistry.js';
+
+const ERROR_MESSAGES = {
+  [ERROR_CODES.PROTOCOL_MISMATCH]: 'Обновите страницу: версии клиента и сервера не совпадают.',
+  [ERROR_CODES.INVALID_REQUEST]: 'Некорректный запрос.',
+};
+
+function requestError(requestId, code, message) {
+  return createErrorAck(requestId, code, message ?? ERROR_MESSAGES[code] ?? 'Операция не выполнена.');
+}
+
+export function registerHandlers(socket, registry) {
+  const requestCache = new Map();
+
+  function handle(event, action) {
+    socket.on(event, (request, acknowledge = () => {}) => {
+      const validation = validateRequestEnvelope(request);
+      const requestId = request?.requestId;
+      if (!validation.ok) {
+        const code = request?.v !== PROTOCOL_VERSION ? ERROR_CODES.PROTOCOL_MISMATCH : ERROR_CODES.INVALID_REQUEST;
+        acknowledge(requestError(requestId, code, validation.reason));
+        return;
+      }
+      if (requestCache.has(requestId)) {
+        acknowledge(requestCache.get(requestId));
+        return;
+      }
+
+      let response;
+      try {
+        response = createSuccessAck(requestId, action(request));
+      } catch (error) {
+        response = error instanceof RegistryError
+          ? requestError(requestId, error.code, error.message)
+          : requestError(requestId, ERROR_CODES.INVALID_REQUEST);
+      }
+      requestCache.set(requestId, response);
+      acknowledge(response);
+    });
+  }
+
+  handle('room:create', ({ displayName }) => {
+    const result = registry.createAndJoin({ socketId: socket.id, displayName });
+    return result.snapshot;
+  });
+
+  handle('room:join', ({ roomId, displayName }) => {
+    const result = registry.join({ roomId, socketId: socket.id, displayName });
+    return result.snapshot;
+  });
+
+  handle('room:leave', ({ roomEpoch }) => {
+    const result = registry.leave({ socketId: socket.id, roomEpoch });
+    return { left: result.left };
+  });
+
+  socket.on('disconnect', () => {
+    registry.leave({ socketId: socket.id });
+    requestCache.clear();
+  });
+}
