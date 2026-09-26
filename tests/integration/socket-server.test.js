@@ -25,6 +25,46 @@ function startIsolatedServer(options) {
 }
 
 describe('Socket.IO integration harness', () => {
+  it('exposes anonymized server metrics without text, names, room IDs, or SDP', async () => {
+    const url = await startIsolatedServer();
+    const client = createClient(url, { transports: ['websocket'], forceNew: true });
+
+    try {
+      await new Promise((resolve, reject) => {
+        client.once('server:ready', resolve);
+        client.once('connect_error', reject);
+      });
+      const initial = await fetch(`${url}/metrics`).then((response) => response.json());
+      const created = await client.emitWithAck('room:create', { v: 1, requestId: crypto.randomUUID(), displayName: 'Анна' });
+      await client.emitWithAck('chat:send', {
+        v: 1,
+        requestId: crypto.randomUUID(),
+        roomEpoch: created.data.roomEpoch,
+        clientMessageId: crypto.randomUUID(),
+        text: 'секретный текст',
+      });
+      const invalidJoin = await client.emitWithAck('room:join', { v: 1, requestId: crypto.randomUUID(), roomId: 'invalid room id', displayName: 'Борис' });
+      expect(invalidJoin).toMatchObject({ ok: false });
+      const current = await fetch(`${url}/metrics`).then((response) => response.json());
+      const serialized = JSON.stringify(current);
+
+      expect(current.rooms).toBe(initial.rooms + 1);
+      expect(current.participants).toBe(initial.participants + 1);
+      expect(current.historyEntries).toBeGreaterThanOrEqual(2);
+      expect(current.historyBytes).toBeGreaterThan(0);
+      expect(current.memory.heapUsedBytes).toEqual(expect.any(Number));
+      expect(current.memory.rssBytes).toEqual(expect.any(Number));
+      expect(current.joinFailures).toBeGreaterThanOrEqual(1);
+      expect(current.rateLimited).toEqual(expect.any(Number));
+      expect(serialized).not.toContain('Анна');
+      expect(serialized).not.toContain('секретный текст');
+      expect(serialized).not.toContain(created.data.roomId);
+      expect(serialized).not.toContain('sdp');
+    } finally {
+      client.close();
+    }
+  });
+
   it('serves healthz without room state and can mark readiness unavailable for new entries', async () => {
     let ready = false;
     const url = await startIsolatedServer({ readiness: { canAcceptJoins: () => ready } });

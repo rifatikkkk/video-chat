@@ -90,6 +90,21 @@ export class RoomRegistry {
     return this.socketIndex.get(socketId);
   }
 
+  getMetrics() {
+    let participants = 0;
+    let historyEntries = 0;
+    for (const room of this.rooms.values()) {
+      participants += room.participants.size;
+      historyEntries += room.history.length;
+    }
+    return {
+      rooms: this.rooms.size,
+      participants,
+      historyBytes: this.historyBytes,
+      historyEntries,
+    };
+  }
+
   createAndJoin({ socketId, displayName }) {
     const normalizedName = this.#validateJoinInput({ socketId, displayName });
     const room = this.createRoom();

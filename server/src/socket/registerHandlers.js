@@ -33,7 +33,7 @@ function emitRoomEvent(io, room, kind, payload, slowConsumerGuard) {
   }
 }
 
-export function registerHandlers(socket, registry, io, { slowConsumerGuard, canAcceptJoins = () => true }) {
+export function registerHandlers(socket, registry, io, { slowConsumerGuard, canAcceptJoins = () => true, metrics = {} }) {
   const requestCache = new Map();
   const buckets = new Map();
   const limits = {
@@ -67,6 +67,7 @@ export function registerHandlers(socket, registry, io, { slowConsumerGuard, canA
         buckets.set(event, bucket);
         const allowance = bucket.take();
         if (!allowance.ok) {
+          metrics.recordRateLimit?.();
           acknowledge(createErrorAck(requestId, ERROR_CODES.RATE_LIMITED, 'Слишком много запросов.', { retryAfterMs: allowance.retryAfterMs }));
           return;
         }
@@ -76,6 +77,7 @@ export function registerHandlers(socket, registry, io, { slowConsumerGuard, canA
       try {
         response = createSuccessAck(requestId, action(request));
       } catch (error) {
+        if (['room:create', 'room:join'].includes(event)) metrics.recordJoinFailure?.();
         response = error instanceof RegistryError
           ? requestError(requestId, error.code, error.message)
           : requestError(requestId, ERROR_CODES.INVALID_REQUEST);
