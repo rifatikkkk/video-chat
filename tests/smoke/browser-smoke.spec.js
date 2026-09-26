@@ -38,3 +38,20 @@ test('two browser contexts can connect, chat, and exchange media with virtual de
     await secondContext.close();
   }
 });
+
+test('shows a clear unsupported-environment screen without creating a session', async ({ browser }) => {
+  const context = await browser.newContext();
+  await context.addInitScript(() => {
+    Object.defineProperty(window, 'RTCPeerConnection', { configurable: true, value: undefined });
+  });
+  const page = await context.newPage();
+
+  try {
+    await page.goto('/');
+    await expect(page.getByRole('alert')).toHaveText('Этот браузер не поддерживает WebRTC.');
+    await expect(page.getByRole('button', { name: 'Создать комнату' })).toBeDisabled();
+    await expect(page.getByLabel('Ваше имя')).toBeDisabled();
+  } finally {
+    await context.close();
+  }
+});
