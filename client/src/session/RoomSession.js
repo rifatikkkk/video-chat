@@ -10,7 +10,7 @@ export const SESSION_STATES = Object.freeze({
 });
 
 export class RoomSession {
-  constructor({ signalingClient, mediaController = {}, peerManager = {}, page = globalThis, onRoomEvent, onSignal } = {}) {
+  constructor({ signalingClient, mediaController = {}, peerManager = {}, page = globalThis, onRoomEvent, onSignal, onServerClosing } = {}) {
     if (!signalingClient) throw new TypeError('signalingClient is required.');
     this.signalingClient = signalingClient;
     this.mediaController = mediaController;
@@ -33,6 +33,10 @@ export class RoomSession {
       },
     });
     this.unsubscribeDisconnect = this.signalingClient.on('disconnect', () => { void this.dispose({ sendLeave: false }); });
+    this.unsubscribeServerClosing = this.signalingClient.on('server:closing', (event) => {
+      onServerClosing?.(event);
+      void this.dispose({ sendLeave: false });
+    });
     this.unsubscribeRoomEvent = this.signalingClient.on('room:event', (event) => this.#receiveEarlyEvent('room', event));
     this.unsubscribeSignalDescription = this.signalingClient.on('signal:description', (event) => this.#receiveEarlyEvent('signal', event));
     this.unsubscribeSignalCandidate = this.signalingClient.on('signal:candidate', (event) => this.#receiveEarlyEvent('signal', event));
@@ -114,6 +118,8 @@ export class RoomSession {
     this.unsubscribeDisconnect = null;
     this.unsubscribeRoomEvent?.();
     this.unsubscribeRoomEvent = null;
+    this.unsubscribeServerClosing?.();
+    this.unsubscribeServerClosing = null;
     this.unsubscribeSignalDescription?.();
     this.unsubscribeSignalDescription = null;
     this.unsubscribeSignalCandidate?.();

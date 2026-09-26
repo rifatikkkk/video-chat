@@ -101,6 +101,31 @@ describe('RoomSession', () => {
     expect(client.disconnectCalls).toBe(1);
   });
 
+  it('handles server maintenance closing as a terminal manual-retry session', async () => {
+    const client = createFakeClient();
+    const page = createPage();
+    const media = { disposeCalls: 0, dispose() { this.disposeCalls += 1; } };
+    const peers = { disposeCalls: 0, dispose() { this.disposeCalls += 1; } };
+    const closingEvents = [];
+    const session = new RoomSession({
+      signalingClient: client,
+      mediaController: media,
+      peerManager: peers,
+      page,
+      onServerClosing: (event) => closingEvents.push(event),
+    });
+    await session.join({ displayName: 'Анна' });
+
+    client.listeners.get('server:closing')?.({ v: 1, reason: 'maintenance' });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(closingEvents).toEqual([{ v: 1, reason: 'maintenance' }]);
+    expect(media.disposeCalls).toBe(1);
+    expect(peers.disposeCalls).toBe(1);
+    expect(client.requests.filter(({ event }) => event === 'room:leave')).toHaveLength(0);
+    expect(session.state).toBe(SESSION_STATES.ENDED);
+  });
+
   it('cleans media and peers on pagehide and does not reuse them after cleanup', async () => {
     const client = createFakeClient();
     const page = createPage();

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getRoomIdFromPath, joinErrorMessage, shouldResetForPageShow } from '../../client/src/App.jsx';
+import { getRoomIdFromPath, joinErrorMessage, sessionEndedMessage, shouldResetForPageShow } from '../../client/src/App.jsx';
 
 describe('room entry routing', () => {
   it('recognizes only a single room ID path segment', () => {
@@ -17,5 +17,11 @@ describe('room entry routing', () => {
   it('requires a new form entry after restoring a page from bfcache', () => {
     expect(shouldResetForPageShow({ persisted: true })).toBe(true);
     expect(shouldResetForPageShow({ persisted: false })).toBe(false);
+  });
+
+  it('explains planned server maintenance as a manual return', () => {
+    expect(sessionEndedMessage('server-closing')).toMatch(/Сервер обновляется/);
+    expect(sessionEndedMessage('server-closing')).toMatch(/вручную/);
+    expect(sessionEndedMessage()).toMatch(/Соединение завершено/);
   });
 });
