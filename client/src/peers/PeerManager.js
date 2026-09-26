@@ -10,12 +10,16 @@ export class PeerManager {
     maxPeers = 3,
     sendDescription = async () => {},
     sendCandidate = async () => {},
+    createMediaStream = () => new MediaStream(),
+    onRemoteStream = () => {},
     now = () => Date.now(),
   } = {}) {
     this.peerConnectionFactory = peerConnectionFactory;
     this.maxPeers = maxPeers;
     this.sendDescription = sendDescription;
     this.sendCandidate = sendCandidate;
+    this.createMediaStream = createMediaStream;
+    this.onRemoteStream = onRemoteStream;
     this.now = now;
     this.roomEpoch = null;
     this.selfParticipantId = null;
@@ -75,8 +79,10 @@ export class PeerManager {
       remoteIceUfrag: null,
       localIceUfrag: null,
       senders: { audio: null, video: null },
+      remoteStream: null,
     };
     connection.onicecandidate = (event) => { void this.#sendCandidate(peer, event.candidate ?? null); };
+    connection.ontrack = (event) => { this.#handleRemoteTrack(peer, event); };
     this.peers.set(remoteParticipantId, peer);
     if (peer.offerer) this.#queuePeerOperation(peer, () => this.#startOffer(peer));
     return peer;
@@ -86,12 +92,14 @@ export class PeerManager {
     const peer = this.peers.get(remoteParticipantId);
     if (!peer) return false;
     peer.connection.close();
+    this.#emitRemoteStream(peer, null);
     this.peers.delete(remoteParticipantId);
     return true;
   }
 
   dispose() {
     for (const peer of this.peers.values()) peer.connection.close();
+    for (const peer of this.peers.values()) this.#emitRemoteStream(peer, null);
     this.peers.clear();
     this.tombstones.clear();
     this.signalLog = [];
@@ -257,6 +265,18 @@ export class PeerManager {
     } finally {
       peer.makingOffer = false;
     }
+  }
+
+  #handleRemoteTrack(peer, event) {
+    const stream = event.streams?.[0] ?? peer.remoteStream ?? this.createMediaStream();
+    peer.remoteStream = stream;
+    if (!stream.getTracks().includes(event.track)) stream.addTrack(event.track);
+    this.#emitRemoteStream(peer, stream);
+  }
+
+  #emitRemoteStream(peer, stream) {
+    peer.remoteStream = stream;
+    this.onRemoteStream({ participantId: peer.remoteParticipantId, stream });
   }
 }
 
