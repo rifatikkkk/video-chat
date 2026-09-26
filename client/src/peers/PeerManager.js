@@ -19,6 +19,7 @@ export class PeerManager {
     this.now = now;
     this.roomEpoch = null;
     this.selfParticipantId = null;
+    this.localTracks = { audio: null, video: null };
     this.peers = new Map();
     this.tombstones = new Set();
     this.signalLog = [];
@@ -73,6 +74,7 @@ export class PeerManager {
       queuedIceCandidates: [],
       remoteIceUfrag: null,
       localIceUfrag: null,
+      senders: { audio: null, video: null },
     };
     connection.onicecandidate = (event) => { void this.#sendCandidate(peer, event.candidate ?? null); };
     this.peers.set(remoteParticipantId, peer);
@@ -93,6 +95,7 @@ export class PeerManager {
     this.peers.clear();
     this.tombstones.clear();
     this.signalLog = [];
+    this.localTracks = { audio: null, video: null };
     this.roomEpoch = null;
     this.selfParticipantId = null;
   }
@@ -103,6 +106,12 @@ export class PeerManager {
 
   getPeers() {
     return [...this.peers.values()];
+  }
+
+  setLocalTrack(kind, track) {
+    if (!['audio', 'video'].includes(kind)) return Promise.resolve();
+    this.localTracks[kind] = track;
+    return Promise.allSettled(this.getPeers().map((peer) => this.#queuePeerOperation(peer, () => this.#replacePeerTrack(peer, kind, track))));
   }
 
   #resetForSnapshot(snapshot) {
@@ -131,8 +140,9 @@ export class PeerManager {
   async #startOffer(peer) {
     if (peer.negotiationStarted) return;
     peer.negotiationStarted = true;
-    peer.connection.addTransceiver('audio', { direction: 'sendrecv' });
-    peer.connection.addTransceiver('video', { direction: 'sendrecv' });
+    peer.senders.audio = peer.connection.addTransceiver('audio', { direction: 'sendrecv' }).sender;
+    peer.senders.video = peer.connection.addTransceiver('video', { direction: 'sendrecv' }).sender;
+    await this.#attachCurrentTracks(peer);
     peer.makingOffer = true;
     try {
       const offer = await peer.connection.createOffer();
@@ -214,6 +224,39 @@ export class PeerManager {
       iceUfrag: peer.localIceUfrag,
       candidate,
     });
+  }
+
+  async #attachCurrentTracks(peer) {
+    await this.#replacePeerTrack(peer, 'audio', this.localTracks.audio);
+    await this.#replacePeerTrack(peer, 'video', this.localTracks.video);
+  }
+
+  async #replacePeerTrack(peer, kind, track) {
+    const sender = this.#ensureSender(peer, kind);
+    try {
+      await sender.replaceTrack(track);
+    } catch {
+      await this.#renegotiate(peer);
+    }
+  }
+
+  #ensureSender(peer, kind) {
+    if (peer.senders[kind]) return peer.senders[kind];
+    const transceiver = peer.connection.addTransceiver(kind, { direction: 'sendrecv' });
+    peer.senders[kind] = transceiver.sender;
+    return peer.senders[kind];
+  }
+
+  async #renegotiate(peer) {
+    peer.makingOffer = true;
+    try {
+      const offer = await peer.connection.createOffer();
+      await peer.connection.setLocalDescription(offer);
+      peer.localIceUfrag = iceUfragFromDescription(peer.connection.localDescription ?? offer);
+      await this.#sendDescription(peer, peer.connection.localDescription ?? offer);
+    } finally {
+      peer.makingOffer = false;
+    }
   }
 }
 
