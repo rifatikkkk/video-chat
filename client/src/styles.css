@@ -20,7 +20,9 @@ a { display: inline-block; margin-top: 1.2rem; color: #b8d8ff; }
 .participant-grid--2, .participant-grid--3, .participant-grid--4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .participant-tile { min-height: 9rem; display: grid; align-content: center; gap: .6rem; padding: 1rem; border: 1px solid #4b5570; border-radius: .75rem; background: #171c27; }
 .participant-avatar { display: grid; width: 3rem; height: 3rem; place-items: center; border-radius: 50%; background: #39445d; font-size: 1.6rem; }
+.participant-media { position: relative; }
 .participant-video { display: block; width: 100%; aspect-ratio: 16 / 9; border-radius: .5rem; background: #0f131c; object-fit: cover; }
+.playback-button { position: absolute; inset: auto .75rem .75rem auto; padding: .45rem .65rem; color: #08101d; background: #ffcf8c; font-size: .85rem; }
 .participant-meta { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
 .participant-tile p { margin: 0; font-size: .85rem; }
 .self-view { overflow: hidden; display: grid; gap: .75rem; margin: 1rem 0; border: 1px solid #4b5570; border-radius: .75rem; background: #171c27; }
