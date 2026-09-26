@@ -55,3 +55,34 @@ test('shows a clear unsupported-environment screen without creating a session', 
     await context.close();
   }
 });
+
+test('supports four participants and the six expected peer pairs', async ({ browser }) => {
+  const contexts = await Promise.all(Array.from({ length: 4 }, () => browser.newContext({ permissions: ['camera', 'microphone'] })));
+  const pages = await Promise.all(contexts.map((context) => context.newPage()));
+  const names = ['Альфа Four', 'Браво Four', 'Чарли Four', 'Дельта Four'];
+
+  try {
+    await pages[0].goto('/');
+    await pages[0].getByLabel('Ваше имя').fill(names[0]);
+    await pages[0].getByRole('button', { name: 'Создать комнату' }).click();
+    await expect(pages[0].getByText('Вы в комнате')).toBeVisible();
+    const roomId = (await pages[0].locator('.room-code').textContent()).trim();
+
+    for (let index = 1; index < pages.length; index += 1) {
+      await pages[index].goto(`/room/${roomId}`);
+      await pages[index].getByLabel('Ваше имя').fill(names[index]);
+      await pages[index].getByRole('button', { name: 'Войти в комнату' }).click();
+    }
+
+    for (const page of pages) {
+      await expect(page.getByText('Вы в комнате')).toBeVisible();
+      await expect(page.locator('.participant-tile')).toHaveCount(4);
+    }
+
+    await pages[2].getByRole('button', { name: 'Выключить микрофон' }).click();
+    await expect(pages[0].getByRole('article').filter({ hasText: names[2] }).getByLabel('Микрофон выключен')).toBeVisible();
+    await pages[2].getByRole('button', { name: 'Включить микрофон' }).click();
+  } finally {
+    await Promise.all(contexts.map((context) => context.close()));
+  }
+});
