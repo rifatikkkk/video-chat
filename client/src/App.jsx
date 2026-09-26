@@ -40,6 +40,7 @@ export default function App() {
   const [copyStatus, setCopyStatus] = useState('');
   const [participants, setParticipants] = useState([]);
   const [remoteStreams, setRemoteStreams] = useState({});
+  const [peerStatuses, setPeerStatuses] = useState({});
   const [messages, setMessages] = useState([]);
   const [draft, setDraft] = useState('');
   const [mediaState, setMediaState] = useState({ audio: 'off', video: 'off' });
@@ -58,6 +59,7 @@ export default function App() {
     setSnapshot(null);
     setParticipants([]);
     setRemoteStreams({});
+    setPeerStatuses({});
     setMessages([]);
     setDraft('');
     setCopyStatus('');
@@ -127,6 +129,14 @@ export default function App() {
           return next;
         });
       },
+      onPeerStatus: ({ participantId, status }) => {
+        setPeerStatuses((current) => {
+          const next = { ...current };
+          if (status) next[participantId] = status;
+          else delete next[participantId];
+          return next;
+        });
+      },
     });
     const unsubscribeTracks = mediaController.subscribeTrackChanges(({ kind, track }) => {
       void peerManager.setLocalTrack(kind, track);
@@ -143,6 +153,11 @@ export default function App() {
         setParticipants((current) => applyParticipantEvent(current, roomEvent));
         if (roomEvent.kind === 'participant-left') {
           setRemoteStreams((current) => {
+            const next = { ...current };
+            delete next[roomEvent.payload.participantId];
+            return next;
+          });
+          setPeerStatuses((current) => {
             const next = { ...current };
             delete next[roomEvent.payload.participantId];
             return next;
@@ -272,7 +287,7 @@ export default function App() {
           <p>Участники комнаты</p>
           <SelfView displayName={displayName} videoTrack={mediaControllerRef.current?.getTrack('video') ?? null} />
           <MediaControls mediaState={mediaState} onToggleMicrophone={toggleMicrophone} onToggleCamera={toggleCamera} />
-          <ParticipantGrid participants={participants} selfParticipantId={snapshot.selfParticipantId} remoteStreams={remoteStreams} />
+          <ParticipantGrid participants={participants} selfParticipantId={snapshot.selfParticipantId} remoteStreams={remoteStreams} peerStatuses={peerStatuses} />
           <ChatPanel messages={messages} draft={draft} onDraftChange={setDraft} onSend={sendMessage} onRetry={(message) => sendMessage(message.text, message)} />
           <p className="room-code">{snapshot.roomId}</p>
           <button type="button" onClick={copyRoomUrl}>Скопировать приглашение</button>

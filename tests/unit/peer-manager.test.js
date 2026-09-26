@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { ICE_CANDIDATE_QUEUE_TTL_MS, MAX_QUEUED_ICE_CANDIDATES, PEER_CONNECTION_CONFIG, PeerManager, iceUfragFromDescription } from '../../client/src/peers/PeerManager.js';
+import { ICE_CANDIDATE_QUEUE_TTL_MS, MAX_QUEUED_ICE_CANDIDATES, PEER_CONNECTION_CONFIG, PEER_PROGRESS_TIMEOUT_MS, PeerManager, iceUfragFromDescription } from '../../client/src/peers/PeerManager.js';
 
 const selfParticipantId = '00000000-0000-4000-8000-000000000001';
 const firstRemoteId = '00000000-0000-4000-8000-000000000002';
@@ -28,7 +28,11 @@ function createPeerConnection(config) {
     localDescription: null,
     remoteDescription: null,
     signalingState: 'stable',
+    iceConnectionState: 'new',
+    connectionState: 'new',
     onicecandidate: null,
+    oniceconnectionstatechange: null,
+    onconnectionstatechange: null,
     close: vi.fn(),
     addTransceiver: vi.fn(function addTransceiver(kind, options) {
       const sender = { kind, replaceTrack: vi.fn(async (track) => { sender.track = track; }) };
@@ -422,5 +426,80 @@ describe('PeerManager', () => {
     manager.handleRoomEvent(left(firstRemoteId));
 
     expect(onRemoteStream).toHaveBeenLastCalledWith({ participantId: firstRemoteId, stream: null });
+  });
+
+  it('reports disconnected and failed peer states without closing or recreating membership', async () => {
+    const onPeerStatus = vi.fn();
+    const factory = createPeerConnectionFactory();
+    const manager = new PeerManager({ peerConnectionFactory: factory, onPeerStatus });
+
+    manager.applySnapshot(snapshot([selfParticipantId, firstRemoteId]));
+    const peer = manager.getPeer(firstRemoteId);
+    await peer.operationQueue;
+    peer.connection.iceConnectionState = 'disconnected';
+    peer.connection.oniceconnectionstatechange();
+    peer.connection.connectionState = 'failed';
+    peer.connection.onconnectionstatechange();
+
+    expect(onPeerStatus).toHaveBeenCalledWith({ participantId: firstRemoteId, status: 'disconnected' });
+    expect(onPeerStatus).toHaveBeenCalledWith({ participantId: firstRemoteId, status: 'failed' });
+    expect(peer.connection.close).not.toHaveBeenCalled();
+    expect(factory).toHaveBeenCalledTimes(1);
+    expect(manager.getPeer(firstRemoteId)).toBe(peer);
+  });
+
+  it('reports stalled after 15 seconds without connection progress and clears the timer on recovery', async () => {
+    const onPeerStatus = vi.fn();
+    const scheduled = [];
+    const manager = new PeerManager({
+      peerConnectionFactory: createPeerConnectionFactory(),
+      onPeerStatus,
+      setTimer: (callback, delay) => {
+        const timer = { callback, delay, cleared: false };
+        scheduled.push(timer);
+        return timer;
+      },
+      clearTimer: (timer) => { timer.cleared = true; },
+    });
+
+    manager.applySnapshot(snapshot([selfParticipantId, firstRemoteId]));
+    const peer = manager.getPeer(firstRemoteId);
+    await peer.operationQueue;
+    peer.connection.iceConnectionState = 'checking';
+    peer.connection.oniceconnectionstatechange();
+
+    expect(scheduled).toHaveLength(1);
+    expect(scheduled[0].delay).toBe(PEER_PROGRESS_TIMEOUT_MS);
+
+    scheduled[0].callback();
+
+    expect(onPeerStatus).toHaveBeenCalledWith({ participantId: firstRemoteId, status: 'stalled' });
+
+    peer.connection.iceConnectionState = 'connected';
+    peer.connection.oniceconnectionstatechange();
+
+    expect(onPeerStatus).toHaveBeenCalledWith({ participantId: firstRemoteId, status: 'connected' });
+  });
+
+  it('clears progress timers when a peer leaves', async () => {
+    const scheduled = [];
+    const manager = new PeerManager({
+      peerConnectionFactory: createPeerConnectionFactory(),
+      setTimer: (callback, delay) => {
+        const timer = { callback, delay, cleared: false };
+        scheduled.push(timer);
+        return timer;
+      },
+      clearTimer: (timer) => { timer.cleared = true; },
+    });
+
+    manager.applySnapshot(snapshot([selfParticipantId, firstRemoteId]));
+    const peer = manager.getPeer(firstRemoteId);
+    await peer.operationQueue;
+    peer.connection.iceConnectionState = 'checking';
+    peer.connection.oniceconnectionstatechange();
+    manager.handleRoomEvent(left(firstRemoteId));
+
+    expect(scheduled[0].cleared).toBe(true);
   });
 });
