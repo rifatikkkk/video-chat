@@ -59,6 +59,20 @@ describe('MediaController', () => {
     expect(controller.getState().micEnabled).toBe(false);
   });
 
+  it('reports missing hardware without leaving a live track or retrying automatically', async () => {
+    const calls = [];
+    const controller = new MediaController({ mediaDevices: { getUserMedia: async (constraints) => {
+      calls.push(constraints);
+      throw Object.assign(new Error('no device'), { name: 'NotFoundError' });
+    } } });
+
+    await expect(controller.startVideo()).resolves.toBeNull();
+
+    expect(calls).toHaveLength(1);
+    expect(controller.getTrack('video')).toBeNull();
+    expect(controller.getState()).toMatchObject({ video: 'off', cameraEnabled: false, videoError: 'NotFoundError' });
+  });
+
   it('stops video on camera off, recaptures a fresh track on on, and notifies peer subscribers', async () => {
     const first = stream('video');
     const second = stream('video');
