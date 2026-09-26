@@ -27,6 +27,7 @@ npm run build      # production-сборка клиента для Chrome, Firef
 npm run start      # запуск сервера без watch-режима
 npm run lint       # статическая проверка JavaScript и JSX
 npm test           # unit и Socket.IO integration-проверки
+npm run test:smoke # browser smoke с виртуальными camera/microphone
 ```
 
 Проект организован как npm workspaces: `client`, `server` и `shared`.
@@ -37,4 +38,6 @@ Production-схема с HTTPS reverse proxy, одним Node.js-процесс�
 
 ## CI
 
-GitHub Actions workflow `.github/workflows/ci.yml` выполняет `npm ci`, проверку версий workspace-пакетов, lint, unit/integration tests и production build. По каждому запуску сохраняется артефакт `ci-report`.
+GitHub Actions workflow `.github/workflows/ci.yml` выполняет `npm ci`, проверку версий workspace-пакетов, lint, unit/integration tests, production build и browser smoke. По каждому запуску сохраняется артефакт `ci-report`; browser smoke дополнительно сохраняет Playwright-отчёт.
+
+Browser smoke использует Chromium с виртуальными camera/microphone и двумя браузерными контекстами. Он проверяет connect, chat и media tile, но не заменяет аппаратные проверки реальной камеры/микрофона.
