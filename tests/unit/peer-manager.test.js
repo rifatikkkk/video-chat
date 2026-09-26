@@ -62,6 +62,15 @@ function sdpWithUfrag(ufrag) {
   return `v=0\r\na=ice-ufrag:${ufrag}\r\n`;
 }
 
+function createStream(id) {
+  const tracks = [];
+  return {
+    id,
+    addTrack: vi.fn((track) => tracks.push(track)),
+    getTracks: vi.fn(() => tracks),
+  };
+}
+
 function snapshot(participantIds) {
   return {
     roomEpoch,
@@ -373,5 +382,45 @@ describe('PeerManager', () => {
     expect(healthyPeer.connection.setRemoteDescription).toHaveBeenCalledWith({ type: 'answer', sdp: sdpWithUfrag('healthy-answer') });
     expect(manager.getPeer(lowerRemoteId)).toBe(failingPeer);
     expect(manager.getPeer(firstRemoteId)).toBe(healthyPeer);
+  });
+
+  it('stores one remote MediaStream per participant and uses event.streams when present', async () => {
+    const onRemoteStream = vi.fn();
+    const manager = new PeerManager({ peerConnectionFactory: createPeerConnectionFactory(), onRemoteStream });
+    const remoteStream = createStream('remote-stream');
+    const videoTrack = { kind: 'video', id: 'video-remote' };
+    const audioTrack = { kind: 'audio', id: 'audio-remote' };
+
+    manager.applySnapshot(snapshot([selfParticipantId, firstRemoteId]));
+    const peer = manager.getPeer(firstRemoteId);
+    peer.connection.ontrack({ track: videoTrack, streams: [remoteStream] });
+    peer.connection.ontrack({ track: audioTrack, streams: [remoteStream] });
+
+    expect(peer.remoteStream).toBe(remoteStream);
+    expect(remoteStream.addTrack).toHaveBeenCalledWith(videoTrack);
+    expect(remoteStream.addTrack).toHaveBeenCalledWith(audioTrack);
+    expect(onRemoteStream).toHaveBeenLastCalledWith({ participantId: firstRemoteId, stream: remoteStream });
+  });
+
+  it('creates a fallback remote MediaStream when ontrack has no streams and clears it on leave', () => {
+    const fallbackStream = createStream('fallback-stream');
+    const onRemoteStream = vi.fn();
+    const manager = new PeerManager({
+      peerConnectionFactory: createPeerConnectionFactory(),
+      createMediaStream: vi.fn(() => fallbackStream),
+      onRemoteStream,
+    });
+    const videoTrack = { kind: 'video', id: 'video-remote' };
+
+    manager.applySnapshot(snapshot([selfParticipantId, firstRemoteId]));
+    const peer = manager.getPeer(firstRemoteId);
+    peer.connection.ontrack({ track: videoTrack, streams: [] });
+
+    expect(peer.remoteStream).toBe(fallbackStream);
+    expect(fallbackStream.addTrack).toHaveBeenCalledWith(videoTrack);
+
+    manager.handleRoomEvent(left(firstRemoteId));
+
+    expect(onRemoteStream).toHaveBeenLastCalledWith({ participantId: firstRemoteId, stream: null });
   });
 });

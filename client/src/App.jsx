@@ -39,6 +39,7 @@ export default function App() {
   const [snapshot, setSnapshot] = useState(null);
   const [copyStatus, setCopyStatus] = useState('');
   const [participants, setParticipants] = useState([]);
+  const [remoteStreams, setRemoteStreams] = useState({});
   const [messages, setMessages] = useState([]);
   const [draft, setDraft] = useState('');
   const [mediaState, setMediaState] = useState({ audio: 'off', video: 'off' });
@@ -56,6 +57,7 @@ export default function App() {
     pendingParticipantEvents.current = [];
     setSnapshot(null);
     setParticipants([]);
+    setRemoteStreams({});
     setMessages([]);
     setDraft('');
     setCopyStatus('');
@@ -117,6 +119,14 @@ export default function App() {
     const peerManager = new PeerManager({
       sendDescription: (payload) => client.request('signal:description', payload),
       sendCandidate: (payload) => client.request('signal:candidate', payload),
+      onRemoteStream: ({ participantId, stream }) => {
+        setRemoteStreams((current) => {
+          const next = { ...current };
+          if (stream) next[participantId] = stream;
+          else delete next[participantId];
+          return next;
+        });
+      },
     });
     const unsubscribeTracks = mediaController.subscribeTrackChanges(({ kind, track }) => {
       void peerManager.setLocalTrack(kind, track);
@@ -131,6 +141,13 @@ export default function App() {
       onRoomEvent: (roomEvent) => {
         if (joiningRef.current) pendingParticipantEvents.current.push(roomEvent);
         setParticipants((current) => applyParticipantEvent(current, roomEvent));
+        if (roomEvent.kind === 'participant-left') {
+          setRemoteStreams((current) => {
+            const next = { ...current };
+            delete next[roomEvent.payload.participantId];
+            return next;
+          });
+        }
         if (['chat-message', 'participant-joined', 'participant-left'].includes(roomEvent.kind)) {
           setMessages((current) => mergeChatEntry(current, roomEvent.payload.entry));
         }
@@ -255,7 +272,7 @@ export default function App() {
           <p>Участники комнаты</p>
           <SelfView displayName={displayName} videoTrack={mediaControllerRef.current?.getTrack('video') ?? null} />
           <MediaControls mediaState={mediaState} onToggleMicrophone={toggleMicrophone} onToggleCamera={toggleCamera} />
-          <ParticipantGrid participants={participants} selfParticipantId={snapshot.selfParticipantId} />
+          <ParticipantGrid participants={participants} selfParticipantId={snapshot.selfParticipantId} remoteStreams={remoteStreams} />
           <ChatPanel messages={messages} draft={draft} onDraftChange={setDraft} onSend={sendMessage} onRetry={(message) => sendMessage(message.text, message)} />
           <p className="room-code">{snapshot.roomId}</p>
           <button type="button" onClick={copyRoomUrl}>Скопировать приглашение</button>
