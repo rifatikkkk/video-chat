@@ -26,6 +26,7 @@
     "test:unit": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration",
     "test:smoke": "playwright test"
+    ,"load:test": "node scripts/load-test.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0",
