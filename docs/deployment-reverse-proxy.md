@@ -58,3 +58,13 @@ The reverse proxy applies per-IP request limits before traffic reaches Node.js:
 - operational HTTP routes use `video_chat_http` at `20r/s` with separate bursts for probes and metrics.
 
 The Node.js server also disconnects sockets that connect but do not successfully `room:create` or `room:join` within 30 seconds. Disconnecting an idle pre-join socket does not remove an active room, because the socket has no registry membership yet.
+
+## Planned shutdown
+
+Send `SIGTERM` or `SIGINT` to the single Node.js process for a planned stop:
+
+1. The process marks readiness as false, so `/readyz` returns `503` and new `room:create` / `room:join` attempts receive `SERVER_BUSY`.
+2. Active clients receive `server:closing` with reason `maintenance`; the UI tells users to return manually.
+3. After `SHUTDOWN_GRACE_MS` (default 10 seconds, configurable from 1 to 60 seconds), the server closes Socket.IO clients and the HTTP server.
+
+Rooms, participants, and chat history are in memory. A newly started process does not restore rooms from the old process.

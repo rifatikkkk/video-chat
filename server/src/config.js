@@ -2,6 +2,7 @@ import { MAX_PARTICIPANTS } from './rooms/RoomRegistry.js';
 
 const DEFAULT_PORT = 3001;
 const DEFAULT_STUN_URLS = Object.freeze(['stun:stun.l.google.com:19302']);
+const DEFAULT_SHUTDOWN_GRACE_MS = 10_000;
 
 export function parseCsv(value) {
   return String(value ?? '')
@@ -40,11 +41,18 @@ export function validateMaxParticipants(value = MAX_PARTICIPANTS) {
   return MAX_PARTICIPANTS;
 }
 
+export function validateShutdownGraceMs(value = DEFAULT_SHUTDOWN_GRACE_MS) {
+  const graceMs = Number(value);
+  if (!Number.isInteger(graceMs) || graceMs < 1_000 || graceMs > 60_000) throw new Error('SHUTDOWN_GRACE_MS must be an integer from 1000 to 60000.');
+  return graceMs;
+}
+
 export function loadServerConfig(env = process.env) {
   return {
     port: validatePort(env.PORT ?? DEFAULT_PORT),
     publicOrigins: validateOrigins(env.PUBLIC_ORIGIN),
     stunUrls: validateStunUrls(env.STUN_URLS),
+    shutdownGraceMs: validateShutdownGraceMs(env.SHUTDOWN_GRACE_MS ?? DEFAULT_SHUTDOWN_GRACE_MS),
     limits: {
       maxParticipants: validateMaxParticipants(env.MAX_PARTICIPANTS ?? MAX_PARTICIPANTS),
     },

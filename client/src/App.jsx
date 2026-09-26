@@ -27,6 +27,11 @@ export function joinErrorMessage(code) {
   return 'Не удалось войти в комнату. Попробуйте ещё раз.';
 }
 
+export function sessionEndedMessage(reason) {
+  if (reason === 'server-closing') return 'Сервер обновляется. Активная комната завершена; вернитесь вручную и создайте или откройте комнату заново.';
+  return 'Соединение завершено. Введите имя, чтобы войти снова.';
+}
+
 export function shouldResetForPageShow(event) {
   return Boolean(event?.persisted);
 }
@@ -46,6 +51,7 @@ export default function App() {
   const [draft, setDraft] = useState('');
   const [mediaState, setMediaState] = useState({ audio: 'off', video: 'off' });
   const sessionRef = useRef(null);
+  const sessionEndReasonRef = useRef(null);
   const pendingParticipantEvents = useRef([]);
   const joiningRef = useRef(false);
   const mediaControllerRef = useRef(null);
@@ -56,6 +62,7 @@ export default function App() {
 
   function resetSessionView({ clearName = true } = {}) {
     joiningRef.current = false;
+    sessionEndReasonRef.current = null;
     pendingParticipantEvents.current = [];
     setSnapshot(null);
     setParticipants([]);
@@ -158,6 +165,9 @@ export default function App() {
       signalingClient: client,
       mediaController,
       peerManager,
+      onServerClosing: () => {
+        sessionEndReasonRef.current = 'server-closing';
+      },
       onRoomEvent: (roomEvent) => {
         if (joiningRef.current) pendingParticipantEvents.current.push(roomEvent);
         setParticipants((current) => applyParticipantEvent(current, roomEvent));
@@ -187,10 +197,11 @@ export default function App() {
     const unsubscribe = session.onStateChange((state) => {
       setStatus(state);
       if (state === 'ended' && sessionRef.current === session) {
+        const endReason = sessionEndReasonRef.current;
         sessionRef.current = null;
         unsubscribeTracks();
         resetSessionView();
-        setError('Соединение завершено. Введите имя, чтобы войти снова.');
+        setError(sessionEndedMessage(endReason));
         unsubscribe();
       }
     });

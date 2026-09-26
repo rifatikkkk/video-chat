@@ -24,7 +24,7 @@ export function createAppServer({
   slowConsumerGuard = new SlowConsumerGuard(),
   idleJoinGuard = new IdleJoinGuard(),
   publicOrigin = process.env.PUBLIC_ORIGIN,
-  readiness = { canAcceptJoins: () => true },
+  readiness = createReadinessState(),
   metrics = new ServerMetrics(),
 } = {}) {
   const allowedOrigins = parseOriginAllowlist(publicOrigin);
@@ -64,4 +64,11 @@ export function createAppServer({
   });
 
   return { app, io, metrics, registry, server };
+}
+
+export function createReadinessState({ acceptingJoins = true } = {}) {
+  return {
+    canAcceptJoins: () => acceptingJoins,
+    setAcceptingJoins: (nextValue) => { acceptingJoins = Boolean(nextValue); },
+  };
 }

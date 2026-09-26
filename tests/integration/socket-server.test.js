@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { io as createClient } from 'socket.io-client';
-import { createAppServer } from '../../server/src/app.js';
+import { createAppServer, createReadinessState } from '../../server/src/app.js';
 import { IdleJoinGuard } from '../../server/src/socket/IdleJoinGuard.js';
 import { SlowConsumerGuard } from '../../server/src/socket/SlowConsumerGuard.js';
+import { ShutdownController } from '../../server/src/shutdown/ShutdownController.js';
 
 const runningServers = [];
 
@@ -94,6 +95,69 @@ describe('Socket.IO integration harness', () => {
       expect(joined).toMatchObject({ ok: true, data: { participants: [{ displayName: 'Анна' }] } });
     } finally {
       client.close();
+    }
+  });
+
+  it('announces planned shutdown, refuses new joins, and closes sockets after grace', async () => {
+    const readiness = createReadinessState();
+    const instance = createAppServer({ readiness });
+    runningServers.push(instance);
+    const url = await new Promise((resolve) => {
+      instance.server.listen(0, '127.0.0.1', () => {
+        const { port } = instance.server.address();
+        resolve(`http://127.0.0.1:${port}`);
+      });
+    });
+    const scheduled = [];
+    const controller = new ShutdownController({
+      io: instance.io,
+      server: instance.server,
+      readiness,
+      exit: () => {},
+      logger: { info: () => {}, error: () => {} },
+      setTimer: (callback, delay) => {
+        const timer = { callback, delay };
+        scheduled.push(timer);
+        return timer;
+      },
+      clearTimer: () => {},
+    });
+    const active = createClient(url, { transports: ['websocket'], forceNew: true, reconnection: false });
+    let newcomer;
+
+    try {
+      const waitReady = (client) => new Promise((resolve, reject) => {
+        client.once('server:ready', resolve);
+        client.once('connect_error', reject);
+      });
+      await waitReady(active);
+      const created = await active.emitWithAck('room:create', { v: 1, requestId: crypto.randomUUID(), displayName: 'Анна' });
+      const closing = new Promise((resolve) => active.once('server:closing', resolve));
+
+      expect(controller.begin({ signal: 'SIGTERM' })).toBe(true);
+      await expect(closing).resolves.toEqual({ v: 1, reason: 'maintenance' });
+
+      const notReady = await fetch(`${url}/readyz`);
+      expect(notReady.status).toBe(503);
+
+      newcomer = createClient(url, { transports: ['websocket'], forceNew: true, reconnection: false });
+      await waitReady(newcomer);
+      const rejected = await newcomer.emitWithAck('room:join', {
+        v: 1,
+        requestId: crypto.randomUUID(),
+        roomId: created.data.roomId,
+        displayName: 'Борис',
+      });
+      expect(rejected).toMatchObject({ ok: false, error: { code: 'SERVER_BUSY' } });
+
+      const disconnected = new Promise((resolve) => active.once('disconnect', resolve));
+      scheduled[0].callback();
+      await disconnected;
+
+      expect(active.connected).toBe(false);
+    } finally {
+      active.close();
+      newcomer?.close();
     }
   });
 
