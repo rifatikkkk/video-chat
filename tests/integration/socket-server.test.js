@@ -25,6 +25,34 @@ function startIsolatedServer(options) {
 }
 
 describe('Socket.IO integration harness', () => {
+  it('accepts only the configured public origin for polling and websocket handshakes', async () => {
+    const publicOrigin = 'https://video.example.test';
+    const url = await startIsolatedServer({ publicOrigin });
+
+    async function connectWithOrigin(origin, transport) {
+      const client = createClient(url, {
+        extraHeaders: { Origin: origin },
+        forceNew: true,
+        reconnection: false,
+        transports: [transport],
+      });
+      try {
+        await new Promise((resolve, reject) => {
+          client.once('server:ready', resolve);
+          client.once('connect_error', reject);
+        });
+        return { connected: client.connected };
+      } finally {
+        client.close();
+      }
+    }
+
+    await expect(connectWithOrigin(publicOrigin, 'polling')).resolves.toEqual({ connected: true });
+    await expect(connectWithOrigin(publicOrigin, 'websocket')).resolves.toEqual({ connected: true });
+    await expect(connectWithOrigin('https://evil.example.test', 'polling')).rejects.toBeTruthy();
+    await expect(connectWithOrigin('https://evil.example.test', 'websocket')).rejects.toBeTruthy();
+  });
+
   it('connects an isolated client and closes its resources', async () => {
     const url = await startIsolatedServer();
     const client = createClient(url, { transports: ['websocket'], forceNew: true });
