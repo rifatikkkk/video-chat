@@ -40,6 +40,8 @@ Production-схема с HTTPS reverse proxy, одним Node.js-процесс�
 
 Журнал репетиции выпуска и отката: [docs/acceptance-release-rollback-rehearsal.md](docs/acceptance-release-rollback-rehearsal.md).
 
+Итоговая матрица приёмки и решение о готовности: [docs/acceptance-readiness-matrix.md](docs/acceptance-readiness-matrix.md).
+
 ## CI
 
 GitHub Actions workflow `.github/workflows/ci.yml` выполняет `npm ci`, проверку версий workspace-пакетов, lint, unit/integration tests, production build и browser smoke. По каждому запуску сохраняется артефакт `ci-report`; browser smoke дополнительно сохраняет Playwright-отчёт.
