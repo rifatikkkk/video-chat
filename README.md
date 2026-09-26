@@ -36,6 +36,8 @@ npm run test:smoke # browser smoke с виртуальными camera/microphone
 
 Production-схема с HTTPS reverse proxy, одним Node.js-процессом и SPA fallback описана в [docs/deployment-reverse-proxy.md](docs/deployment-reverse-proxy.md).
 
+Полный runbook запуска, конфигурации, обновления и отката: [docs/operations-runbook.md](docs/operations-runbook.md).
+
 ## CI
 
 GitHub Actions workflow `.github/workflows/ci.yml` выполняет `npm ci`, проверку версий workspace-пакетов, lint, unit/integration tests, production build и browser smoke. По каждому запуску сохраняется артефакт `ci-report`; browser smoke дополнительно сохраняет Playwright-отчёт.
