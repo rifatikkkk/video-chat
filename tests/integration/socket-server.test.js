@@ -25,6 +25,37 @@ function startIsolatedServer(options) {
 }
 
 describe('Socket.IO integration harness', () => {
+  it('serves healthz without room state and can mark readiness unavailable for new entries', async () => {
+    let ready = false;
+    const url = await startIsolatedServer({ readiness: { canAcceptJoins: () => ready } });
+    const health = await fetch(`${url}/healthz`);
+    const notReady = await fetch(`${url}/readyz`);
+    const client = createClient(url, { transports: ['websocket'], forceNew: true });
+
+    try {
+      expect(health.status).toBe(200);
+      expect(await health.json()).toEqual({ status: 'ok' });
+      expect(notReady.status).toBe(503);
+      expect(await notReady.json()).toEqual({ status: 'not_ready' });
+
+      await new Promise((resolve, reject) => {
+        client.once('server:ready', resolve);
+        client.once('connect_error', reject);
+      });
+      const busy = await client.emitWithAck('room:create', { v: 1, requestId: crypto.randomUUID(), displayName: 'Анна' });
+      expect(busy).toMatchObject({ ok: false, error: { code: 'SERVER_BUSY' } });
+
+      ready = true;
+      const readyResponse = await fetch(`${url}/readyz`);
+      expect(readyResponse.status).toBe(200);
+      expect(await readyResponse.json()).toEqual({ status: 'ready' });
+      const joined = await client.emitWithAck('room:create', { v: 1, requestId: crypto.randomUUID(), displayName: 'Анна' });
+      expect(joined).toMatchObject({ ok: true, data: { participants: [{ displayName: 'Анна' }] } });
+    } finally {
+      client.close();
+    }
+  });
+
   it('accepts only the configured public origin for polling and websocket handshakes', async () => {
     const publicOrigin = 'https://video.example.test';
     const url = await startIsolatedServer({ publicOrigin });

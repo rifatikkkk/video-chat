@@ -16,6 +16,7 @@ import { TokenBucket } from './TokenBucket.js';
 const ERROR_MESSAGES = {
   [ERROR_CODES.PROTOCOL_MISMATCH]: 'Обновите страницу: версии клиента и сервера не совпадают.',
   [ERROR_CODES.INVALID_REQUEST]: 'Некорректный запрос.',
+  [ERROR_CODES.SERVER_BUSY]: 'Сервер временно не принимает новые входы.',
 };
 
 function requestError(requestId, code, message) {
@@ -32,7 +33,7 @@ function emitRoomEvent(io, room, kind, payload, slowConsumerGuard) {
   }
 }
 
-export function registerHandlers(socket, registry, io, { slowConsumerGuard }) {
+export function registerHandlers(socket, registry, io, { slowConsumerGuard, canAcceptJoins = () => true }) {
   const requestCache = new Map();
   const buckets = new Map();
   const limits = {
@@ -85,6 +86,7 @@ export function registerHandlers(socket, registry, io, { slowConsumerGuard }) {
   }
 
   handle('room:create', ({ displayName }) => {
+    if (!canAcceptJoins()) throw new RegistryError(ERROR_CODES.SERVER_BUSY, 'Server is not ready to accept new room entries.');
     const result = registry.createAndJoin({ socketId: socket.id, displayName });
     emitRoomEvent(io, result.room, 'participant-joined', {
       participant: toPublicParticipant(result.participant),
@@ -94,6 +96,7 @@ export function registerHandlers(socket, registry, io, { slowConsumerGuard }) {
   });
 
   handle('room:join', ({ roomId, displayName }) => {
+    if (!canAcceptJoins()) throw new RegistryError(ERROR_CODES.SERVER_BUSY, 'Server is not ready to accept new room entries.');
     const result = registry.join({ roomId, socketId: socket.id, displayName });
     emitRoomEvent(io, result.room, 'participant-joined', {
       participant: toPublicParticipant(result.participant),

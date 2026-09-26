@@ -1,8 +1,9 @@
 import { createAppServer } from './app.js';
+import { loadServerConfig } from './config.js';
 
-const port = Number(process.env.PORT ?? 3001);
-const { server } = createAppServer();
+const config = loadServerConfig();
+const { server } = createAppServer({ publicOrigin: config.publicOrigins });
 
-server.listen(port, () => {
-  console.log(`Video Chat server listening on http://localhost:${port}`);
+server.listen(config.port, () => {
+  console.log(`Video Chat server listening on http://localhost:${config.port}`);
 });
