@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { io as createClient } from 'socket.io-client';
 import { createAppServer } from '../../server/src/app.js';
+import { IdleJoinGuard } from '../../server/src/socket/IdleJoinGuard.js';
 import { SlowConsumerGuard } from '../../server/src/socket/SlowConsumerGuard.js';
 
 const runningServers = [];
@@ -137,6 +138,33 @@ describe('Socket.IO integration harness', () => {
       expect(ready).toEqual({ v: 1 });
     } finally {
       client.close();
+    }
+  });
+
+  it('disconnects idle sockets before join without removing active rooms', async () => {
+    const idleJoinGuard = new IdleJoinGuard({ timeoutMs: 100 });
+    const url = await startIsolatedServer({ idleJoinGuard });
+    const active = createClient(url, { transports: ['websocket'], forceNew: true });
+    let idle;
+
+    try {
+      const waitReady = (client) => new Promise((resolve, reject) => {
+        client.once('server:ready', resolve);
+        client.once('connect_error', reject);
+      });
+      await waitReady(active);
+      const created = await active.emitWithAck('room:create', { v: 1, requestId: crypto.randomUUID(), displayName: 'Анна' });
+      idle = createClient(url, { transports: ['websocket'], forceNew: true, reconnection: false });
+      const disconnected = new Promise((resolve) => idle.once('disconnect', resolve));
+      await waitReady(idle);
+      await disconnected;
+
+      expect(idle.connected).toBe(false);
+      expect(active.connected).toBe(true);
+      expect(runningServers[0].registry.getRoom(created.data.roomId)).toBeDefined();
+    } finally {
+      active.close();
+      idle?.close();
     }
   });
 

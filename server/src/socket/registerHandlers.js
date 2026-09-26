@@ -33,7 +33,7 @@ function emitRoomEvent(io, room, kind, payload, slowConsumerGuard) {
   }
 }
 
-export function registerHandlers(socket, registry, io, { slowConsumerGuard, canAcceptJoins = () => true, metrics = {} }) {
+export function registerHandlers(socket, registry, io, { slowConsumerGuard, idleJoinGuard, canAcceptJoins = () => true, metrics = {} }) {
   const requestCache = new Map();
   const buckets = new Map();
   const limits = {
@@ -42,6 +42,7 @@ export function registerHandlers(socket, registry, io, { slowConsumerGuard, canA
     'signal:description': { rate: 10, burst: 20 },
     'signal:candidate': { rate: 100, burst: 300 },
   };
+  const stopIdleJoinWatch = idleJoinGuard?.watch?.(socket, () => Boolean(registry.getMembership(socket.id))) ?? (() => {});
 
   function handle(event, action) {
     socket.on(event, (request, acknowledge = () => {}) => {
@@ -172,5 +173,6 @@ export function registerHandlers(socket, registry, io, { slowConsumerGuard, canA
     }
     requestCache.clear();
     buckets.clear();
+    stopIdleJoinWatch();
   });
 }

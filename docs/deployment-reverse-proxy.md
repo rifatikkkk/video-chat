@@ -49,3 +49,12 @@ Cache policy is split by route:
 - everything else, including `index.html` and direct `/room/<id>` SPA routes, gets `no-cache` so a release is picked up quickly.
 
 Access logs use `video_chat_safe`, which replaces `/room/<id>` paths with `/room/[room-id-redacted]`. Keep query strings out of the log format and do not log request bodies, chat messages, display names, SDP, or ICE candidates.
+
+## Handshake and idle join limits
+
+The reverse proxy applies per-IP request limits before traffic reaches Node.js:
+
+- `/socket.io/` uses `video_chat_handshake` at `2r/s` with `burst=20 nodelay`. This allows a small office NAT to open four legitimate clients at once while limiting handshake floods.
+- operational HTTP routes use `video_chat_http` at `20r/s` with separate bursts for probes and metrics.
+
+The Node.js server also disconnects sockets that connect but do not successfully `room:create` or `room:join` within 30 seconds. Disconnecting an idle pre-join socket does not remove an active room, because the socket has no registry membership yet.
