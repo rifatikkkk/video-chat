@@ -458,6 +458,24 @@ describe('PeerManager', () => {
     expect(manager.getPeer(firstRemoteId)).toBe(peer);
   });
 
+  it('isolates an unreachable NAT pair while keeping the other two peer connections alive', async () => {
+    const onPeerStatus = vi.fn();
+    const manager = new PeerManager({ peerConnectionFactory: createPeerConnectionFactory(), onPeerStatus });
+
+    manager.applySnapshot(snapshot([selfParticipantId, lowerRemoteId, firstRemoteId, secondRemoteId]));
+    await Promise.all(manager.getPeers().map((peer) => peer.operationQueue));
+    const unreachable = manager.getPeer(lowerRemoteId);
+    unreachable.connection.iceConnectionState = 'failed';
+    unreachable.connection.connectionState = 'failed';
+    unreachable.connection.oniceconnectionstatechange();
+    unreachable.connection.onconnectionstatechange();
+
+    expect(onPeerStatus).toHaveBeenCalledWith({ participantId: lowerRemoteId, status: 'failed' });
+    expect(manager.getPeer(firstRemoteId).connection.close).not.toHaveBeenCalled();
+    expect(manager.getPeer(secondRemoteId).connection.close).not.toHaveBeenCalled();
+    expect(manager.getPeers()).toHaveLength(3);
+  });
+
   it('reports stalled after 15 seconds without connection progress and clears the timer on recovery', async () => {
     const onPeerStatus = vi.fn();
     const scheduled = [];
