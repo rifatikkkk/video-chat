@@ -6,6 +6,7 @@ import { RoomRegistry } from './rooms/RoomRegistry.js';
 import { registerHandlers } from './socket/registerHandlers.js';
 import { SlowConsumerGuard } from './socket/SlowConsumerGuard.js';
 import { parseCsv } from './config.js';
+import { ServerMetrics } from './metrics/ServerMetrics.js';
 
 export function parseOriginAllowlist(publicOrigin = process.env.PUBLIC_ORIGIN) {
   return Array.isArray(publicOrigin) ? publicOrigin : parseCsv(publicOrigin);
@@ -22,6 +23,7 @@ export function createAppServer({
   slowConsumerGuard = new SlowConsumerGuard(),
   publicOrigin = process.env.PUBLIC_ORIGIN,
   readiness = { canAcceptJoins: () => true },
+  metrics = new ServerMetrics(),
 } = {}) {
   const allowedOrigins = parseOriginAllowlist(publicOrigin);
   const app = express();
@@ -50,10 +52,14 @@ export function createAppServer({
     response.json({ status: 'ready' });
   });
 
-  io.on('connection', (socket) => {
-    socket.emit('server:ready', { v: PROTOCOL_VERSION });
-    registerHandlers(socket, registry, io, { slowConsumerGuard, canAcceptJoins: readiness.canAcceptJoins });
+  app.get('/metrics', (_request, response) => {
+    response.json(metrics.snapshot({ registry }));
   });
 
-  return { app, io, registry, server };
+  io.on('connection', (socket) => {
+    socket.emit('server:ready', { v: PROTOCOL_VERSION });
+    registerHandlers(socket, registry, io, { slowConsumerGuard, canAcceptJoins: readiness.canAcceptJoins, metrics });
+  });
+
+  return { app, io, metrics, registry, server };
 }

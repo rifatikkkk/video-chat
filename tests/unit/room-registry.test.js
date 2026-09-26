@@ -2,6 +2,19 @@ import { describe, expect, it } from 'vitest';
 import { RegistryError, RoomRegistry } from '../../server/src/rooms/RoomRegistry.js';
 
 describe('RoomRegistry model', () => {
+  it('reports anonymized aggregate metrics', () => {
+    const registry = new RoomRegistry({ roomIdGenerator: () => 'room-one' });
+
+    registry.createAndJoin({ socketId: 'socket-one', displayName: 'Анна' });
+
+    expect(registry.getMetrics()).toEqual({
+      rooms: 1,
+      participants: 1,
+      historyBytes: expect.any(Number),
+      historyEntries: 1,
+    });
+  });
+
   it('creates RAM-only rooms with independent epochs and sequences', () => {
     const registry = new RoomRegistry();
     const first = registry.createRoom('room_A');
