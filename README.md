@@ -38,6 +38,8 @@ Production-схема с HTTPS reverse proxy, одним Node.js-процесс�
 
 Полный runbook запуска, конфигурации, обновления и отката: [docs/operations-runbook.md](docs/operations-runbook.md).
 
+Журнал репетиции выпуска и отката: [docs/acceptance-release-rollback-rehearsal.md](docs/acceptance-release-rollback-rehearsal.md).
+
 ## CI
 
 GitHub Actions workflow `.github/workflows/ci.yml` выполняет `npm ci`, проверку версий workspace-пакетов, lint, unit/integration tests, production build и browser smoke. По каждому запуску сохраняется артефакт `ci-report`; browser smoke дополнительно сохраняет Playwright-отчёт.
