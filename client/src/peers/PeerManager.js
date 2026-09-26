@@ -3,6 +3,7 @@ export const PEER_CONNECTION_CONFIG = Object.freeze({
 });
 export const MAX_QUEUED_ICE_CANDIDATES = 256;
 export const ICE_CANDIDATE_QUEUE_TTL_MS = 15_000;
+export const PEER_PROGRESS_TIMEOUT_MS = 15_000;
 
 export class PeerManager {
   constructor({
@@ -12,7 +13,10 @@ export class PeerManager {
     sendCandidate = async () => {},
     createMediaStream = () => new MediaStream(),
     onRemoteStream = () => {},
+    onPeerStatus = () => {},
     now = () => Date.now(),
+    setTimer = (callback, delay) => setTimeout(callback, delay),
+    clearTimer = (timer) => clearTimeout(timer),
   } = {}) {
     this.peerConnectionFactory = peerConnectionFactory;
     this.maxPeers = maxPeers;
@@ -20,7 +24,10 @@ export class PeerManager {
     this.sendCandidate = sendCandidate;
     this.createMediaStream = createMediaStream;
     this.onRemoteStream = onRemoteStream;
+    this.onPeerStatus = onPeerStatus;
     this.now = now;
+    this.setTimer = setTimer;
+    this.clearTimer = clearTimer;
     this.roomEpoch = null;
     this.selfParticipantId = null;
     this.localTracks = { audio: null, video: null };
@@ -80,10 +87,15 @@ export class PeerManager {
       localIceUfrag: null,
       senders: { audio: null, video: null },
       remoteStream: null,
+      status: 'new',
+      progressTimer: null,
     };
     connection.onicecandidate = (event) => { void this.#sendCandidate(peer, event.candidate ?? null); };
     connection.ontrack = (event) => { this.#handleRemoteTrack(peer, event); };
+    connection.oniceconnectionstatechange = () => { this.#updatePeerStatus(peer); };
+    connection.onconnectionstatechange = () => { this.#updatePeerStatus(peer); };
     this.peers.set(remoteParticipantId, peer);
+    this.#emitPeerStatus(peer, 'new');
     if (peer.offerer) this.#queuePeerOperation(peer, () => this.#startOffer(peer));
     return peer;
   }
@@ -91,15 +103,19 @@ export class PeerManager {
   closePeer(remoteParticipantId) {
     const peer = this.peers.get(remoteParticipantId);
     if (!peer) return false;
+    this.#clearProgressTimer(peer);
     peer.connection.close();
     this.#emitRemoteStream(peer, null);
+    this.#emitPeerStatus(peer, null);
     this.peers.delete(remoteParticipantId);
     return true;
   }
 
   dispose() {
+    for (const peer of this.peers.values()) this.#clearProgressTimer(peer);
     for (const peer of this.peers.values()) peer.connection.close();
     for (const peer of this.peers.values()) this.#emitRemoteStream(peer, null);
+    for (const peer of this.peers.values()) this.#emitPeerStatus(peer, null);
     this.peers.clear();
     this.tombstones.clear();
     this.signalLog = [];
@@ -277,6 +293,43 @@ export class PeerManager {
   #emitRemoteStream(peer, stream) {
     peer.remoteStream = stream;
     this.onRemoteStream({ participantId: peer.remoteParticipantId, stream });
+  }
+
+  #updatePeerStatus(peer) {
+    const state = peer.connection.connectionState === 'failed' ? 'failed' : peer.connection.iceConnectionState;
+    if (state === 'failed' || state === 'disconnected') {
+      this.#clearProgressTimer(peer);
+      this.#emitPeerStatus(peer, state);
+      return;
+    }
+    if (['connected', 'completed'].includes(state)) {
+      this.#clearProgressTimer(peer);
+      this.#emitPeerStatus(peer, 'connected');
+      return;
+    }
+    if (['checking', 'connecting'].includes(state)) {
+      this.#emitPeerStatus(peer, state);
+      this.#startProgressTimer(peer);
+    }
+  }
+
+  #startProgressTimer(peer) {
+    if (peer.progressTimer) return;
+    peer.progressTimer = this.setTimer(() => {
+      peer.progressTimer = null;
+      if (this.peers.get(peer.remoteParticipantId) === peer) this.#emitPeerStatus(peer, 'stalled');
+    }, PEER_PROGRESS_TIMEOUT_MS);
+  }
+
+  #clearProgressTimer(peer) {
+    if (!peer.progressTimer) return;
+    this.clearTimer(peer.progressTimer);
+    peer.progressTimer = null;
+  }
+
+  #emitPeerStatus(peer, status) {
+    peer.status = status;
+    this.onPeerStatus({ participantId: peer.remoteParticipantId, status });
   }
 }
 

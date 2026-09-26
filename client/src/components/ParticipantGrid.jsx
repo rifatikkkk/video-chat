@@ -50,12 +50,20 @@ function ParticipantMedia({ stream }) {
   );
 }
 
-export function ParticipantGrid({ participants, selfParticipantId, remoteStreams = {} }) {
+export function peerStatusMessage(status) {
+  if (status === 'disconnected') return 'P2P-связь прервана. Чат работает; для восстановления выйдите и войдите снова.';
+  if (status === 'failed') return 'P2P-связь не установилась. Чат работает; для восстановления выйдите и войдите снова.';
+  if (status === 'stalled') return 'P2P-связь не прогрессирует 15 секунд. Чат работает; для восстановления выйдите и войдите снова.';
+  return '';
+}
+
+export function ParticipantGrid({ participants, selfParticipantId, remoteStreams = {}, peerStatuses = {} }) {
   return (
     <section className={`participant-grid participant-grid--${participants.length}`} aria-label="Участники комнаты">
       {participants.map((participant) => {
         const self = participant.participantId === selfParticipantId;
         const stream = self ? null : remoteStreams[participant.participantId] ?? null;
+        const peerMessage = self ? '' : peerStatusMessage(peerStatuses[participant.participantId]);
         return (
           <article className="participant-tile" key={participant.participantId}>
             <ParticipantMedia stream={stream} />
@@ -64,6 +72,7 @@ export function ParticipantGrid({ participants, selfParticipantId, remoteStreams
               <span aria-label={participant.micEnabled ? 'Микрофон включён' : 'Микрофон выключен'} title={participant.micEnabled ? 'Микрофон включён' : 'Микрофон выключен'}>{participant.micEnabled ? '🎙' : '🔇'}</span>
             </div>
             <p>{participant.cameraEnabled ? 'Камера будет подключена' : 'Камера выключена'}</p>
+            {peerMessage && <p className="peer-status" role="status">{peerMessage}</p>}
           </article>
         );
       })}
