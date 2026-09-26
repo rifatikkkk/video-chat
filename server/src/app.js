@@ -5,12 +5,10 @@ import { PROTOCOL_VERSION } from '@video-chat/shared';
 import { RoomRegistry } from './rooms/RoomRegistry.js';
 import { registerHandlers } from './socket/registerHandlers.js';
 import { SlowConsumerGuard } from './socket/SlowConsumerGuard.js';
+import { parseCsv } from './config.js';
 
 export function parseOriginAllowlist(publicOrigin = process.env.PUBLIC_ORIGIN) {
-  return String(publicOrigin ?? '')
-    .split(',')
-    .map((origin) => origin.trim())
-    .filter(Boolean);
+  return Array.isArray(publicOrigin) ? publicOrigin : parseCsv(publicOrigin);
 }
 
 export function isOriginAllowed(origin, allowedOrigins = parseOriginAllowlist()) {
@@ -19,7 +17,12 @@ export function isOriginAllowed(origin, allowedOrigins = parseOriginAllowlist())
   return allowedOrigins.includes(origin);
 }
 
-export function createAppServer({ registry = new RoomRegistry(), slowConsumerGuard = new SlowConsumerGuard(), publicOrigin = process.env.PUBLIC_ORIGIN } = {}) {
+export function createAppServer({
+  registry = new RoomRegistry(),
+  slowConsumerGuard = new SlowConsumerGuard(),
+  publicOrigin = process.env.PUBLIC_ORIGIN,
+  readiness = { canAcceptJoins: () => true },
+} = {}) {
   const allowedOrigins = parseOriginAllowlist(publicOrigin);
   const app = express();
   const server = http.createServer(app);
@@ -35,13 +38,21 @@ export function createAppServer({ registry = new RoomRegistry(), slowConsumerGua
     connectionStateRecovery: false,
   });
 
-  app.get('/health', (_request, response) => {
+  app.get(['/health', '/healthz'], (_request, response) => {
     response.json({ status: 'ok' });
+  });
+
+  app.get('/readyz', (_request, response) => {
+    if (!readiness.canAcceptJoins()) {
+      response.status(503).json({ status: 'not_ready' });
+      return;
+    }
+    response.json({ status: 'ready' });
   });
 
   io.on('connection', (socket) => {
     socket.emit('server:ready', { v: PROTOCOL_VERSION });
-    registerHandlers(socket, registry, io, { slowConsumerGuard });
+    registerHandlers(socket, registry, io, { slowConsumerGuard, canAcceptJoins: readiness.canAcceptJoins });
   });
 
   return { app, io, registry, server };

@@ -14,7 +14,7 @@ npm ci
 npm run dev
 ```
 
-Клиент будет доступен по адресу `http://localhost:5173`, сервер — по адресу `http://localhost:3001`. Проверка сервера: `http://localhost:3001/health`.
+Клиент будет доступен по адресу `http://localhost:5173`, сервер — по адресу `http://localhost:3001`. Проверки сервера: `http://localhost:3001/healthz` и `http://localhost:3001/readyz`.
 
 ## Команды
 

@@ -2,7 +2,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { ERROR_CODES, validateChatMessage, validateDisplayName, validateRoomId } from '@video-chat/shared';
 
 const ROOM_ID_BYTES = 16;
-const MAX_PARTICIPANTS = 4;
+export const MAX_PARTICIPANTS = 4;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export class RegistryError extends Error {
