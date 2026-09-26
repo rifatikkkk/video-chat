@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { attachMediaElementStream, peerStatusMessage } from '../../client/src/components/ParticipantGrid.jsx';
+import { attachMediaElementStream, peerDiagnosticsMessage, peerStatusMessage } from '../../client/src/components/ParticipantGrid.jsx';
 
 describe('attachMediaElementStream', () => {
   it('assigns a participant stream, starts playback, and clears it on cleanup', async () => {
@@ -42,5 +42,18 @@ describe('peerStatusMessage', () => {
     expect(peerStatusMessage('failed')).toMatch(/выйдите и войдите снова/);
     expect(peerStatusMessage('stalled')).toMatch(/15 секунд/);
     expect(peerStatusMessage('connected')).toBe('');
+  });
+});
+
+describe('peerDiagnosticsMessage', () => {
+  it('formats safe WebRTC quality diagnostics without calling RTT end-to-end latency', () => {
+    expect(peerDiagnosticsMessage({
+      rttMs: 42,
+      packetLossPercent: 2.5,
+      framesPerSecond: 30,
+      localCandidateType: 'relay',
+      remoteCandidateType: 'srflx',
+    })).toBe('RTT WebRTC: 42 мс · потери: 2.5% · FPS: 30 · ICE: relay/srflx');
+    expect(peerDiagnosticsMessage(null)).toBe('');
   });
 });

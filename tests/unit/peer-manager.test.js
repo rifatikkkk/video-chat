@@ -1,5 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
-import { ICE_CANDIDATE_QUEUE_TTL_MS, MAX_QUEUED_ICE_CANDIDATES, PEER_CONNECTION_CONFIG, PEER_PROGRESS_TIMEOUT_MS, PeerManager, iceUfragFromDescription } from '../../client/src/peers/PeerManager.js';
+import {
+  ICE_CANDIDATE_QUEUE_TTL_MS,
+  MAX_QUEUED_ICE_CANDIDATES,
+  PEER_CONNECTION_CONFIG,
+  PEER_PROGRESS_TIMEOUT_MS,
+  WEBRTC_DIAGNOSTICS_INTERVAL_MS,
+  PeerManager,
+  iceUfragFromDescription,
+  summarizeWebRtcStats,
+} from '../../client/src/peers/PeerManager.js';
 
 const selfParticipantId = '00000000-0000-4000-8000-000000000001';
 const firstRemoteId = '00000000-0000-4000-8000-000000000002';
@@ -55,6 +64,7 @@ function createPeerConnection(config) {
       this.remoteDescription = description;
       this.signalingState = description.type === 'offer' ? 'have-remote-offer' : 'stable';
     }),
+    getStats: vi.fn(async () => new Map()),
     addIceCandidate: vi.fn(async function addIceCandidate(candidate) {
       this.appliedCandidates ??= [];
       this.appliedCandidates.push(candidate);
@@ -481,6 +491,71 @@ describe('PeerManager', () => {
     expect(onPeerStatus).toHaveBeenCalledWith({ participantId: firstRemoteId, status: 'connected' });
   });
 
+  it('collects local WebRTC diagnostics at a limited frequency after connection', async () => {
+    const scheduled = [];
+    const onPeerDiagnostics = vi.fn();
+    const manager = new PeerManager({
+      peerConnectionFactory: createPeerConnectionFactory(),
+      onPeerDiagnostics,
+      setTimer: (callback, delay) => {
+        const timer = { callback, delay, cleared: false };
+        scheduled.push(timer);
+        return timer;
+      },
+      clearTimer: (timer) => { timer.cleared = true; },
+    });
+
+    manager.applySnapshot(snapshot([selfParticipantId, firstRemoteId]));
+    const peer = manager.getPeer(firstRemoteId);
+    await peer.operationQueue;
+    peer.connection.getStats.mockResolvedValueOnce(new Map([
+      ['pair', { id: 'pair', type: 'candidate-pair', selected: true, currentRoundTripTime: 0.042, localCandidateId: 'local', remoteCandidateId: 'remote' }],
+      ['local', { id: 'local', type: 'local-candidate', candidateType: 'relay', address: '192.0.2.10', port: 12345 }],
+      ['remote', { id: 'remote', type: 'remote-candidate', candidateType: 'srflx', address: '198.51.100.20', port: 54321 }],
+      ['video-in', { id: 'video-in', type: 'inbound-rtp', kind: 'video', framesPerSecond: 29.7, packetsLost: 2, packetsReceived: 98 }],
+    ]));
+
+    peer.connection.iceConnectionState = 'connected';
+    peer.connection.oniceconnectionstatechange();
+
+    expect(scheduled).toHaveLength(1);
+    expect(scheduled[0].delay).toBe(WEBRTC_DIAGNOSTICS_INTERVAL_MS);
+
+    scheduled[0].callback();
+    await Promise.resolve();
+
+    expect(onPeerDiagnostics).toHaveBeenCalledWith({
+      participantId: firstRemoteId,
+      diagnostics: {
+        rttMs: 42,
+        packetLossPercent: 2,
+        framesPerSecond: 30,
+        localCandidateType: 'relay',
+        remoteCandidateType: 'srflx',
+      },
+    });
+    expect(scheduled[1].delay).toBe(WEBRTC_DIAGNOSTICS_INTERVAL_MS);
+  });
+
+  it('summarizes diagnostics without exposing SDP, addresses, ports, or raw candidates', () => {
+    const diagnostics = summarizeWebRtcStats(new Map([
+      ['pair', { id: 'pair', type: 'candidate-pair', nominated: true, roundTripTime: 0.1, localCandidateId: 'local', remoteCandidateId: 'remote', sdp: 'v=0', candidate: 'candidate:raw' }],
+      ['local', { id: 'local', type: 'local-candidate', candidateType: 'host', ip: '10.0.0.1', address: '10.0.0.1', port: 4444 }],
+      ['remote', { id: 'remote', type: 'remote-candidate', candidateType: 'relay', ip: '203.0.113.1', address: '203.0.113.1', port: 5555 }],
+      ['audio-in', { id: 'audio-in', type: 'inbound-rtp', kind: 'audio', packetsLost: 1, packetsReceived: 99 }],
+    ]));
+
+    expect(diagnostics).toEqual({
+      rttMs: 100,
+      packetLossPercent: 1,
+      framesPerSecond: null,
+      localCandidateType: 'host',
+      remoteCandidateType: 'relay',
+    });
+    const serialized = JSON.stringify(diagnostics);
+    expect(serialized).not.toMatch(/10\.0\.0\.1|203\.0\.113\.1|4444|5555|candidate:raw|v=0/);
+  });
+
   it('clears progress timers when a peer leaves', async () => {
     const scheduled = [];
     const manager = new PeerManager({
@@ -503,14 +578,16 @@ describe('PeerManager', () => {
     expect(scheduled[0].cleared).toBe(true);
   });
 
-  it('disposes peers, timers, ICE queues, callbacks, and local tracks idempotently', async () => {
+  it('disposes peers, timers, diagnostics, ICE queues, callbacks, and local tracks idempotently', async () => {
     const scheduled = [];
     const onRemoteStream = vi.fn();
     const onPeerStatus = vi.fn();
+    const onPeerDiagnostics = vi.fn();
     const manager = new PeerManager({
       peerConnectionFactory: createPeerConnectionFactory(),
       onRemoteStream,
       onPeerStatus,
+      onPeerDiagnostics,
       setTimer: (callback, delay) => {
         const timer = { callback, delay, cleared: false };
         scheduled.push(timer);
@@ -526,6 +603,8 @@ describe('PeerManager', () => {
     await manager.setLocalTrack('video', videoTrack);
     peer.connection.iceConnectionState = 'checking';
     peer.connection.oniceconnectionstatechange();
+    peer.connection.iceConnectionState = 'connected';
+    peer.connection.oniceconnectionstatechange();
     manager.handleSignal({ roomEpoch, fromParticipantId: firstRemoteId, iceUfrag: 'pending', candidate: { candidate: 'candidate:pending' } });
     await peer.operationQueue;
 
@@ -535,12 +614,14 @@ describe('PeerManager', () => {
     expect(peer.connection.close).toHaveBeenCalledTimes(1);
     expect(peer.queuedIceCandidates).toEqual([]);
     expect(scheduled[0].cleared).toBe(true);
+    expect(scheduled[1].cleared).toBe(true);
     expect(peer.connection.onicecandidate).toBeNull();
     expect(peer.connection.ontrack).toBeNull();
     expect(peer.connection.oniceconnectionstatechange).toBeNull();
     expect(peer.connection.onconnectionstatechange).toBeNull();
     expect(onRemoteStream).toHaveBeenLastCalledWith({ participantId: firstRemoteId, stream: null });
     expect(onPeerStatus).toHaveBeenLastCalledWith({ participantId: firstRemoteId, status: null });
+    expect(onPeerDiagnostics).toHaveBeenLastCalledWith({ participantId: firstRemoteId, diagnostics: null });
     expect(manager.getPeers()).toEqual([]);
     expect(manager.localTracks).toEqual({ audio: null, video: null });
   });
