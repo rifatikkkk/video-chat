@@ -84,7 +84,10 @@ async function main() {
     }
   }
 
-  const metrics = await fetch(`${url}/metrics`).then((response) => response.json());
+  const metricsBeforeCleanup = await fetch(`${url}/metrics`).then((response) => response.json());
+  for (const socket of clients) socket.disconnect();
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  const metricsAfterCleanup = await fetch(`${url}/metrics`).then((response) => response.json());
   const sorted = [...ackLatencies].sort((a, b) => a - b);
   const percentile = (p) => sorted.length ? sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))] : null;
   console.log(JSON.stringify({
@@ -96,7 +99,8 @@ async function main() {
     rateLimited,
     slowClientDelayMs,
     ackLatencyMs: { min: sorted[0] ?? null, p50: percentile(0.5), p95: percentile(0.95), max: sorted.at(-1) ?? null },
-    serverMetrics: metrics,
+    serverMetricsBeforeCleanup: metricsBeforeCleanup,
+    serverMetricsAfterCleanup: metricsAfterCleanup,
     createdRooms: createdRooms.length,
     elapsedMs: Date.now() - startedAt,
   }, null, 2));
