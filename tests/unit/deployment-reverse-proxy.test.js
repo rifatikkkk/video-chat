@@ -50,4 +50,12 @@ describe('HTTPS reverse proxy deployment config', () => {
     expect(nginxConfig).toMatch(/add_header Cache-Control \$video_chat_cache_control always;/);
     expect(deploymentDoc).toMatch(/`index\.html` and direct `\/room\/<id>` SPA routes, gets `no-cache`/);
   });
+
+  it('limits handshakes without blocking four clients behind one office NAT', () => {
+    expect(nginxConfig).toMatch(/limit_req_zone \$binary_remote_addr zone=video_chat_handshake:10m rate=2r\/s;/);
+    expect(nginxConfig).toMatch(/location \/socket\.io\/\s*\{\s*limit_req zone=video_chat_handshake burst=20 nodelay;/s);
+    expect(nginxConfig).toMatch(/limit_req_zone \$binary_remote_addr zone=video_chat_http:10m rate=20r\/s;/);
+    expect(deploymentDoc).toMatch(/four legitimate clients at once/);
+    expect(deploymentDoc).toMatch(/30 seconds/);
+  });
 });

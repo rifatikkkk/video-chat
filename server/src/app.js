@@ -5,6 +5,7 @@ import { PROTOCOL_VERSION } from '@video-chat/shared';
 import { RoomRegistry } from './rooms/RoomRegistry.js';
 import { registerHandlers } from './socket/registerHandlers.js';
 import { SlowConsumerGuard } from './socket/SlowConsumerGuard.js';
+import { IdleJoinGuard } from './socket/IdleJoinGuard.js';
 import { parseCsv } from './config.js';
 import { ServerMetrics } from './metrics/ServerMetrics.js';
 
@@ -21,6 +22,7 @@ export function isOriginAllowed(origin, allowedOrigins = parseOriginAllowlist())
 export function createAppServer({
   registry = new RoomRegistry(),
   slowConsumerGuard = new SlowConsumerGuard(),
+  idleJoinGuard = new IdleJoinGuard(),
   publicOrigin = process.env.PUBLIC_ORIGIN,
   readiness = { canAcceptJoins: () => true },
   metrics = new ServerMetrics(),
@@ -58,7 +60,7 @@ export function createAppServer({
 
   io.on('connection', (socket) => {
     socket.emit('server:ready', { v: PROTOCOL_VERSION });
-    registerHandlers(socket, registry, io, { slowConsumerGuard, canAcceptJoins: readiness.canAcceptJoins, metrics });
+    registerHandlers(socket, registry, io, { slowConsumerGuard, idleJoinGuard, canAcceptJoins: readiness.canAcceptJoins, metrics });
   });
 
   return { app, io, metrics, registry, server };
