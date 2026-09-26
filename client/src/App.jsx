@@ -118,6 +118,9 @@ export default function App() {
       sendDescription: (payload) => client.request('signal:description', payload),
       sendCandidate: (payload) => client.request('signal:candidate', payload),
     });
+    const unsubscribeTracks = mediaController.subscribeTrackChanges(({ kind, track }) => {
+      void peerManager.setLocalTrack(kind, track);
+    });
     mediaControllerRef.current = mediaController;
     pendingParticipantEvents.current = [];
     joiningRef.current = true;
@@ -138,6 +141,7 @@ export default function App() {
       setStatus(state);
       if (state === 'ended' && sessionRef.current === session) {
         sessionRef.current = null;
+        unsubscribeTracks();
         resetSessionView();
         setError('Соединение завершено. Введите имя, чтобы войти снова.');
         unsubscribe();
@@ -159,6 +163,7 @@ export default function App() {
       joiningRef.current = false;
       sessionRef.current = null;
       setError(joinErrorMessage(joinError.code));
+      unsubscribeTracks();
       unsubscribe();
     }
   }

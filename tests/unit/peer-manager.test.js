@@ -31,7 +31,10 @@ function createPeerConnection(config) {
     onicecandidate: null,
     close: vi.fn(),
     addTransceiver: vi.fn(function addTransceiver(kind, options) {
-      this.transceivers.push({ kind, ...options });
+      const sender = { kind, replaceTrack: vi.fn(async (track) => { sender.track = track; }) };
+      const transceiver = { kind, sender, ...options };
+      this.transceivers.push(transceiver);
+      return transceiver;
     }),
     createOffer: vi.fn(async () => ({ type: 'offer', sdp: sdpWithUfrag('offer-ufrag') })),
     createAnswer: vi.fn(async () => ({ type: 'answer', sdp: sdpWithUfrag('answer-ufrag') })),
@@ -151,8 +154,8 @@ describe('PeerManager', () => {
 
     expect(peer.connection.addTransceiver).toHaveBeenCalledTimes(2);
     expect(peer.connection.transceivers).toEqual([
-      { kind: 'audio', direction: 'sendrecv' },
-      { kind: 'video', direction: 'sendrecv' },
+      expect.objectContaining({ kind: 'audio', direction: 'sendrecv' }),
+      expect.objectContaining({ kind: 'video', direction: 'sendrecv' }),
     ]);
     expect(peer.connection.createOffer).toHaveBeenCalledTimes(1);
     expect(peer.connection.setLocalDescription).toHaveBeenCalledWith({ type: 'offer', sdp: sdpWithUfrag('offer-ufrag') });
@@ -253,6 +256,72 @@ describe('PeerManager', () => {
   it('parses ICE ufrag from SDP descriptions', () => {
     expect(iceUfragFromDescription({ sdp: 'v=0\r\na=ice-ufrag:abc123\r\n' })).toBe('abc123');
     expect(iceUfragFromDescription({ sdp: 'v=0\r\n' })).toBeNull();
+  });
+
+  it('shares live local audio and video tracks across up to three peer senders', async () => {
+    const audioTrack = { kind: 'audio', id: 'audio-1' };
+    const videoTrack = { kind: 'video', id: 'video-1' };
+    const manager = new PeerManager({ peerConnectionFactory: createPeerConnectionFactory() });
+
+    manager.applySnapshot(snapshot([selfParticipantId, firstRemoteId, secondRemoteId, thirdRemoteId]));
+    await Promise.all(manager.getPeers().map((peer) => peer.operationQueue));
+    await manager.setLocalTrack('audio', audioTrack);
+    await manager.setLocalTrack('video', videoTrack);
+
+    for (const peer of manager.getPeers()) {
+      expect(peer.senders.audio.replaceTrack).toHaveBeenCalledWith(audioTrack);
+      expect(peer.senders.video.replaceTrack).toHaveBeenCalledWith(videoTrack);
+    }
+  });
+
+  it('attaches existing local tracks when a new peer is created', async () => {
+    const audioTrack = { kind: 'audio', id: 'audio-1' };
+    const videoTrack = { kind: 'video', id: 'video-1' };
+    const manager = new PeerManager({ peerConnectionFactory: createPeerConnectionFactory() });
+
+    manager.applySnapshot(snapshot([selfParticipantId]));
+    await manager.setLocalTrack('audio', audioTrack);
+    await manager.setLocalTrack('video', videoTrack);
+    manager.handleRoomEvent(joined(firstRemoteId));
+    const peer = manager.getPeer(firstRemoteId);
+    await peer.operationQueue;
+
+    expect(peer.senders.audio.replaceTrack).toHaveBeenCalledWith(audioTrack);
+    expect(peer.senders.video.replaceTrack).toHaveBeenCalledWith(videoTrack);
+  });
+
+  it('detaches a stopped camera from every sender with replaceTrack(null)', async () => {
+    const videoTrack = { kind: 'video', id: 'video-1' };
+    const manager = new PeerManager({ peerConnectionFactory: createPeerConnectionFactory() });
+
+    manager.applySnapshot(snapshot([selfParticipantId, firstRemoteId, secondRemoteId]));
+    await Promise.all(manager.getPeers().map((peer) => peer.operationQueue));
+    await manager.setLocalTrack('video', videoTrack);
+    await manager.setLocalTrack('video', null);
+
+    for (const peer of manager.getPeers()) {
+      expect(peer.senders.video.replaceTrack).toHaveBeenCalledWith(null);
+    }
+  });
+
+  it('falls back to renegotiation when replaceTrack fails without stopping other peers', async () => {
+    const sendDescription = vi.fn(async () => ({ ok: true }));
+    const manager = new PeerManager({ peerConnectionFactory: createPeerConnectionFactory(), sendDescription });
+    const nextTrack = { kind: 'video', id: 'video-2' };
+
+    manager.applySnapshot(snapshot([selfParticipantId, firstRemoteId, secondRemoteId]));
+    await Promise.all(manager.getPeers().map((peer) => peer.operationQueue));
+    const failingPeer = manager.getPeer(firstRemoteId);
+    const healthyPeer = manager.getPeer(secondRemoteId);
+    sendDescription.mockClear();
+    failingPeer.senders.video.replaceTrack.mockRejectedValueOnce(new Error('replace failed'));
+
+    await manager.setLocalTrack('video', nextTrack);
+
+    expect(failingPeer.senders.video.replaceTrack).toHaveBeenCalledWith(nextTrack);
+    expect(healthyPeer.senders.video.replaceTrack).toHaveBeenCalledWith(nextTrack);
+    expect(sendDescription).toHaveBeenCalledWith({ roomEpoch, toParticipantId: firstRemoteId, description: { type: 'offer', sdp: sdpWithUfrag('offer-ufrag') } });
+    expect(manager.getPeer(secondRemoteId)).toBe(healthyPeer);
   });
 
   it('rolls back a polite peer on offer collision and sends an answer', async () => {
