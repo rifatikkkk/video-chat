@@ -29,3 +29,7 @@ npm test           # unit и Socket.IO integration-проверки
 ```
 
 Проект организован как npm workspaces: `client`, `server` и `shared`.
+
+## Размещение
+
+Production-схема с HTTPS reverse proxy, одним Node.js-процессом и SPA fallback описана в [docs/deployment-reverse-proxy.md](docs/deployment-reverse-proxy.md).
