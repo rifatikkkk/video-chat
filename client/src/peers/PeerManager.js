@@ -103,19 +103,13 @@ export class PeerManager {
   closePeer(remoteParticipantId) {
     const peer = this.peers.get(remoteParticipantId);
     if (!peer) return false;
-    this.#clearProgressTimer(peer);
-    peer.connection.close();
-    this.#emitRemoteStream(peer, null);
-    this.#emitPeerStatus(peer, null);
+    this.#cleanupPeer(peer);
     this.peers.delete(remoteParticipantId);
     return true;
   }
 
   dispose() {
-    for (const peer of this.peers.values()) this.#clearProgressTimer(peer);
-    for (const peer of this.peers.values()) peer.connection.close();
-    for (const peer of this.peers.values()) this.#emitRemoteStream(peer, null);
-    for (const peer of this.peers.values()) this.#emitPeerStatus(peer, null);
+    for (const peer of this.peers.values()) this.#cleanupPeer(peer);
     this.peers.clear();
     this.tombstones.clear();
     this.signalLog = [];
@@ -330,6 +324,19 @@ export class PeerManager {
   #emitPeerStatus(peer, status) {
     peer.status = status;
     this.onPeerStatus({ participantId: peer.remoteParticipantId, status });
+  }
+
+  #cleanupPeer(peer) {
+    this.#clearProgressTimer(peer);
+    peer.queuedIceCandidates = [];
+    peer.operationQueue = Promise.resolve();
+    peer.connection.onicecandidate = null;
+    peer.connection.ontrack = null;
+    peer.connection.oniceconnectionstatechange = null;
+    peer.connection.onconnectionstatechange = null;
+    peer.connection.close();
+    this.#emitRemoteStream(peer, null);
+    this.#emitPeerStatus(peer, null);
   }
 }
 

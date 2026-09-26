@@ -502,4 +502,46 @@ describe('PeerManager', () => {
 
     expect(scheduled[0].cleared).toBe(true);
   });
+
+  it('disposes peers, timers, ICE queues, callbacks, and local tracks idempotently', async () => {
+    const scheduled = [];
+    const onRemoteStream = vi.fn();
+    const onPeerStatus = vi.fn();
+    const manager = new PeerManager({
+      peerConnectionFactory: createPeerConnectionFactory(),
+      onRemoteStream,
+      onPeerStatus,
+      setTimer: (callback, delay) => {
+        const timer = { callback, delay, cleared: false };
+        scheduled.push(timer);
+        return timer;
+      },
+      clearTimer: (timer) => { timer.cleared = true; },
+    });
+    const videoTrack = { kind: 'video', id: 'video-1' };
+
+    manager.applySnapshot(snapshot([selfParticipantId, firstRemoteId]));
+    const peer = manager.getPeer(firstRemoteId);
+    await peer.operationQueue;
+    await manager.setLocalTrack('video', videoTrack);
+    peer.connection.iceConnectionState = 'checking';
+    peer.connection.oniceconnectionstatechange();
+    manager.handleSignal({ roomEpoch, fromParticipantId: firstRemoteId, iceUfrag: 'pending', candidate: { candidate: 'candidate:pending' } });
+    await peer.operationQueue;
+
+    manager.dispose();
+    manager.dispose();
+
+    expect(peer.connection.close).toHaveBeenCalledTimes(1);
+    expect(peer.queuedIceCandidates).toEqual([]);
+    expect(scheduled[0].cleared).toBe(true);
+    expect(peer.connection.onicecandidate).toBeNull();
+    expect(peer.connection.ontrack).toBeNull();
+    expect(peer.connection.oniceconnectionstatechange).toBeNull();
+    expect(peer.connection.onconnectionstatechange).toBeNull();
+    expect(onRemoteStream).toHaveBeenLastCalledWith({ participantId: firstRemoteId, stream: null });
+    expect(onPeerStatus).toHaveBeenLastCalledWith({ participantId: firstRemoteId, status: null });
+    expect(manager.getPeers()).toEqual([]);
+    expect(manager.localTracks).toEqual({ audio: null, video: null });
+  });
 });
