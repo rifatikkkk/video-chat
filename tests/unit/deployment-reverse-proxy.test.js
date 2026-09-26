@@ -22,4 +22,32 @@ describe('HTTPS reverse proxy deployment config', () => {
     expect(deploymentDoc).toMatch(/PUBLIC_ORIGIN/);
     expect(deploymentDoc).toMatch(/\/room\/abc123/);
   });
+
+  it('sets security headers that keep camera and microphone usable on same origin', () => {
+    expect(nginxConfig).toMatch(/add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self';/);
+    expect(nginxConfig).toMatch(/connect-src 'self' wss:/);
+    expect(nginxConfig).toMatch(/media-src 'self' blob:/);
+    expect(nginxConfig).toMatch(/frame-ancestors 'none'/);
+    expect(nginxConfig).toMatch(/add_header Permissions-Policy "camera=\(self\), microphone=\(self\),/);
+    expect(nginxConfig).toMatch(/add_header Referrer-Policy "no-referrer" always;/);
+    expect(deploymentDoc).toMatch(/camera` and `microphone` for `self` only/);
+  });
+
+  it('redacts room URLs in access logs and keeps request bodies out of the log format', () => {
+    const safeLogFormat = /log_format video_chat_safe[\s\S]*?;/m.exec(nginxConfig)?.[0] ?? '';
+
+    expect(nginxConfig).toMatch(/map \$uri \$video_chat_sanitized_uri \{\s*~\^\/room\/ \/room\/\[room-id-redacted\];/s);
+    expect(safeLogFormat).toMatch(/log_format video_chat_safe/);
+    expect(safeLogFormat).toMatch(/"\$request_method \$video_chat_sanitized_uri \$server_protocol"/);
+    expect(safeLogFormat).not.toMatch(/\$request_uri|\$args|\$request_body/);
+    expect(deploymentDoc).toMatch(/\/room\/\[room-id-redacted\]/);
+  });
+
+  it('keeps html fresh while caching hashed static assets', () => {
+    expect(nginxConfig).toMatch(/map \$uri \$video_chat_cache_control \{/);
+    expect(nginxConfig).toMatch(/~\^\/assets\/ "public, max-age=31536000, immutable";/);
+    expect(nginxConfig).toMatch(/default "no-cache";/);
+    expect(nginxConfig).toMatch(/add_header Cache-Control \$video_chat_cache_control always;/);
+    expect(deploymentDoc).toMatch(/`index\.html` and direct `\/room\/<id>` SPA routes, gets `no-cache`/);
+  });
 });
