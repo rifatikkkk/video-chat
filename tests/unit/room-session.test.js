@@ -83,6 +83,43 @@ describe('RoomSession', () => {
     expect(client.connectCalls).toBe(1);
   });
 
+  it('cleans media and peers on socket disconnect without sending leave', async () => {
+    const client = createFakeClient();
+    const page = createPage();
+    const media = { disposeCalls: 0, dispose() { this.disposeCalls += 1; } };
+    const peers = { disposeCalls: 0, dispose() { this.disposeCalls += 1; } };
+    const session = new RoomSession({ signalingClient: client, mediaController: media, peerManager: peers, page });
+    await session.join({ displayName: 'Анна' });
+
+    client.trigger('disconnect');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await session.dispose();
+
+    expect(media.disposeCalls).toBe(1);
+    expect(peers.disposeCalls).toBe(1);
+    expect(client.requests.filter(({ event }) => event === 'room:leave')).toHaveLength(0);
+    expect(client.disconnectCalls).toBe(1);
+  });
+
+  it('cleans media and peers on pagehide and does not reuse them after cleanup', async () => {
+    const client = createFakeClient();
+    const page = createPage();
+    const media = { disposeCalls: 0, dispose() { this.disposeCalls += 1; } };
+    const peers = { disposeCalls: 0, dispose() { this.disposeCalls += 1; } };
+    const session = new RoomSession({ signalingClient: client, mediaController: media, peerManager: peers, page });
+    await session.join({ displayName: 'Анна' });
+
+    page.trigger('pagehide');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await session.dispose();
+
+    expect(media.disposeCalls).toBe(1);
+    expect(peers.disposeCalls).toBe(1);
+    expect(client.requests.at(-1)).toEqual({ event: 'room:leave', payload: { roomEpoch: 'epoch' } });
+    expect(session.snapshot).toBeNull();
+    await expect(session.join({ displayName: 'Анна' })).rejects.toThrow(/only once/);
+  });
+
   it('syncs peer lifecycle from snapshot, room events, and signals', async () => {
     const client = createFakeClient();
     const page = createPage();
