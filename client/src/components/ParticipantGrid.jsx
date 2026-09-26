@@ -57,13 +57,25 @@ export function peerStatusMessage(status) {
   return '';
 }
 
-export function ParticipantGrid({ participants, selfParticipantId, remoteStreams = {}, peerStatuses = {} }) {
+export function peerDiagnosticsMessage(diagnostics) {
+  if (!diagnostics) return '';
+  const parts = [];
+  if (Number.isFinite(diagnostics.rttMs)) parts.push(`RTT WebRTC: ${diagnostics.rttMs} мс`);
+  if (Number.isFinite(diagnostics.packetLossPercent)) parts.push(`потери: ${diagnostics.packetLossPercent}%`);
+  if (Number.isFinite(diagnostics.framesPerSecond)) parts.push(`FPS: ${diagnostics.framesPerSecond}`);
+  const candidateTypes = [diagnostics.localCandidateType, diagnostics.remoteCandidateType].filter(Boolean).join('/');
+  if (candidateTypes) parts.push(`ICE: ${candidateTypes}`);
+  return parts.join(' · ');
+}
+
+export function ParticipantGrid({ participants, selfParticipantId, remoteStreams = {}, peerStatuses = {}, peerDiagnostics = {} }) {
   return (
     <section className={`participant-grid participant-grid--${participants.length}`} aria-label="Участники комнаты">
       {participants.map((participant) => {
         const self = participant.participantId === selfParticipantId;
         const stream = self ? null : remoteStreams[participant.participantId] ?? null;
         const peerMessage = self ? '' : peerStatusMessage(peerStatuses[participant.participantId]);
+        const diagnosticsMessage = self ? '' : peerDiagnosticsMessage(peerDiagnostics[participant.participantId]);
         return (
           <article className="participant-tile" key={participant.participantId}>
             <ParticipantMedia stream={stream} />
@@ -73,6 +85,7 @@ export function ParticipantGrid({ participants, selfParticipantId, remoteStreams
             </div>
             <p>{participant.cameraEnabled ? 'Камера будет подключена' : 'Камера выключена'}</p>
             {peerMessage && <p className="peer-status" role="status">{peerMessage}</p>}
+            {diagnosticsMessage && <p className="peer-diagnostics">{diagnosticsMessage}</p>}
           </article>
         );
       })}

@@ -4,6 +4,7 @@ export const PEER_CONNECTION_CONFIG = Object.freeze({
 export const MAX_QUEUED_ICE_CANDIDATES = 256;
 export const ICE_CANDIDATE_QUEUE_TTL_MS = 15_000;
 export const PEER_PROGRESS_TIMEOUT_MS = 15_000;
+export const WEBRTC_DIAGNOSTICS_INTERVAL_MS = 5_000;
 
 export class PeerManager {
   constructor({
@@ -14,9 +15,11 @@ export class PeerManager {
     createMediaStream = () => new MediaStream(),
     onRemoteStream = () => {},
     onPeerStatus = () => {},
+    onPeerDiagnostics = () => {},
     now = () => Date.now(),
     setTimer = (callback, delay) => setTimeout(callback, delay),
     clearTimer = (timer) => clearTimeout(timer),
+    diagnosticsIntervalMs = WEBRTC_DIAGNOSTICS_INTERVAL_MS,
   } = {}) {
     this.peerConnectionFactory = peerConnectionFactory;
     this.maxPeers = maxPeers;
@@ -25,9 +28,11 @@ export class PeerManager {
     this.createMediaStream = createMediaStream;
     this.onRemoteStream = onRemoteStream;
     this.onPeerStatus = onPeerStatus;
+    this.onPeerDiagnostics = onPeerDiagnostics;
     this.now = now;
     this.setTimer = setTimer;
     this.clearTimer = clearTimer;
+    this.diagnosticsIntervalMs = diagnosticsIntervalMs;
     this.roomEpoch = null;
     this.selfParticipantId = null;
     this.localTracks = { audio: null, video: null };
@@ -89,6 +94,7 @@ export class PeerManager {
       remoteStream: null,
       status: 'new',
       progressTimer: null,
+      diagnosticsTimer: null,
     };
     connection.onicecandidate = (event) => { void this.#sendCandidate(peer, event.candidate ?? null); };
     connection.ontrack = (event) => { this.#handleRemoteTrack(peer, event); };
@@ -299,6 +305,7 @@ export class PeerManager {
     if (['connected', 'completed'].includes(state)) {
       this.#clearProgressTimer(peer);
       this.#emitPeerStatus(peer, 'connected');
+      this.#startDiagnostics(peer);
       return;
     }
     if (['checking', 'connecting'].includes(state)) {
@@ -321,6 +328,36 @@ export class PeerManager {
     peer.progressTimer = null;
   }
 
+  #startDiagnostics(peer) {
+    if (peer.diagnosticsTimer || !peer.connection.getStats) return;
+    peer.diagnosticsTimer = this.setTimer(() => {
+      peer.diagnosticsTimer = null;
+      void this.#sampleDiagnostics(peer);
+    }, this.diagnosticsIntervalMs);
+  }
+
+  #clearDiagnosticsTimer(peer) {
+    if (!peer.diagnosticsTimer) return;
+    this.clearTimer(peer.diagnosticsTimer);
+    peer.diagnosticsTimer = null;
+  }
+
+  async #sampleDiagnostics(peer) {
+    if (this.peers.get(peer.remoteParticipantId) !== peer || !peer.connection.getStats) return;
+    try {
+      const report = await peer.connection.getStats();
+      if (this.peers.get(peer.remoteParticipantId) !== peer) return;
+      this.onPeerDiagnostics({
+        participantId: peer.remoteParticipantId,
+        diagnostics: summarizeWebRtcStats(report),
+      });
+    } catch {
+      // Local diagnostics are best-effort only. Connection status remains the source of truth.
+    } finally {
+      if (this.peers.get(peer.remoteParticipantId) === peer) this.#startDiagnostics(peer);
+    }
+  }
+
   #emitPeerStatus(peer, status) {
     peer.status = status;
     this.onPeerStatus({ participantId: peer.remoteParticipantId, status });
@@ -328,6 +365,7 @@ export class PeerManager {
 
   #cleanupPeer(peer) {
     this.#clearProgressTimer(peer);
+    this.#clearDiagnosticsTimer(peer);
     peer.queuedIceCandidates = [];
     peer.operationQueue = Promise.resolve();
     peer.connection.onicecandidate = null;
@@ -337,10 +375,47 @@ export class PeerManager {
     peer.connection.close();
     this.#emitRemoteStream(peer, null);
     this.#emitPeerStatus(peer, null);
+    this.onPeerDiagnostics({ participantId: peer.remoteParticipantId, diagnostics: null });
   }
 }
 
 export function iceUfragFromDescription(description) {
   if (!description?.sdp) return null;
   return /^a=ice-ufrag:(.+)$/m.exec(description.sdp)?.[1]?.trim() ?? null;
+}
+
+export function summarizeWebRtcStats(statsReport) {
+  const reports = [...statsReport.values?.() ?? []];
+  const selectedPair = reports.find((report) => (
+    report.type === 'candidate-pair'
+    && (report.selected || report.nominated || report.state === 'succeeded')
+  )) ?? null;
+  const localCandidate = reports.find((report) => report.id === selectedPair?.localCandidateId) ?? null;
+  const remoteCandidate = reports.find((report) => report.id === selectedPair?.remoteCandidateId) ?? null;
+  const inboundRtp = reports.filter((report) => report.type === 'inbound-rtp');
+  const packetsLost = sumFinite(inboundRtp.map((report) => report.packetsLost));
+  const packetsReceived = sumFinite(inboundRtp.map((report) => report.packetsReceived));
+  const totalPackets = packetsLost + packetsReceived;
+  const framesPerSecond = firstFinite(reports.map((report) => report.kind === 'video' || report.mediaType === 'video' ? report.framesPerSecond : null));
+  const rttSeconds = firstFinite([selectedPair?.currentRoundTripTime, selectedPair?.roundTripTime]);
+
+  return {
+    rttMs: rttSeconds === null ? null : Math.round(rttSeconds * 1000),
+    packetLossPercent: totalPackets > 0 ? Math.round((packetsLost / totalPackets) * 1000) / 10 : null,
+    framesPerSecond: framesPerSecond === null ? null : Math.round(framesPerSecond),
+    localCandidateType: safeCandidateType(localCandidate?.candidateType),
+    remoteCandidateType: safeCandidateType(remoteCandidate?.candidateType),
+  };
+}
+
+function sumFinite(values) {
+  return values.reduce((total, value) => (Number.isFinite(value) ? total + value : total), 0);
+}
+
+function firstFinite(values) {
+  return values.find((value) => Number.isFinite(value)) ?? null;
+}
+
+function safeCandidateType(candidateType) {
+  return ['host', 'srflx', 'prflx', 'relay'].includes(candidateType) ? candidateType : null;
 }
