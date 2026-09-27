@@ -5,7 +5,7 @@
 ## Демо-просмотр
 
 Для проверки корректности работы веб-приложения вы можете воспользоваться следующей ссылкой:
-[https://drive.google.com/file/d/1RaNB4MPi-C77WnRs3meFykg6v81Iw4eG/view?usp=sharing](Видео-демо)
+[Видео-демо](https://drive.google.com/file/d/1RaNB4MPi-C77WnRs3meFykg6v81Iw4eG/view?usp=sharing)
 
 ## Требования
 
